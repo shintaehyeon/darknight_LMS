@@ -1,0 +1,618 @@
+/* 
+  다크나이트 - 팝업 스타일시트 (popup.css)
+  컨셉: 고성능 공상과학(Sci-Fi) HUD 다크 테마 대시보드
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Play:wght@400;700&display=swap');
+
+:root {
+  --bg-primary: #070709;
+  --bg-secondary: #0F0F14;
+  --bg-tertiary: #171720;
+  
+  --accent-gold: #FFB800;
+  --accent-gold-glow: rgba(255, 184, 0, 0.35);
+  --accent-blue: #00F0FF;
+  --accent-blue-glow: rgba(0, 240, 255, 0.35);
+  
+  --text-primary: #FFFFFF;
+  --text-secondary: #8E8E9E;
+  --text-muted: #4F4F5E;
+  
+  --border-glass: rgba(255, 255, 255, 0.05);
+  --border-neon-gold: rgba(255, 184, 0, 0.15);
+  --border-neon-blue: rgba(0, 240, 255, 0.15);
+  
+  --card-glass: rgba(15, 15, 20, 0.7);
+  --font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-technical: 'Play', monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: 380px;
+  height: 520px;
+  background-color: var(--bg-primary);
+  font-family: var(--font-family);
+  color: var(--text-primary);
+  overflow: hidden;
+}
+
+.container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  gap: 12px;
+  overflow: hidden;
+  background: radial-gradient(circle at top right, rgba(255, 184, 0, 0.03), transparent 70%),
+              radial-gradient(circle at bottom left, rgba(0, 240, 255, 0.02), transparent 70%);
+}
+
+/* --- 헤더 스타일 --- */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-b: 1px solid var(--border-glass);
+}
+
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.glowing-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background-color: rgba(255, 184, 0, 0.05);
+  border: 1px solid var(--border-neon-gold);
+  color: var(--accent-gold);
+  filter: drop-shadow(0 0 4px var(--accent-gold-glow));
+}
+
+.title-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--accent-gold);
+  font-family: var(--font-technical);
+  text-shadow: 0 0 6px var(--accent-gold-glow);
+}
+
+.subtitle {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.system-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-glass);
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--accent-blue);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--accent-blue);
+}
+
+.status-text {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  text-transform: uppercase;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.animate-pulse {
+  animation: pulse 2s infinite ease-in-out;
+}
+
+/* --- 활성 페이지 섹션 --- */
+.active-page-section {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass);
+}
+
+.label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.section-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+}
+
+.domain-badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--accent-blue);
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid var(--border-neon-blue);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.page-title-text {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- 메인 미디어 영역 --- */
+.media-container {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  gap: 8px;
+}
+
+.section-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 4px;
+}
+
+.section-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-primary);
+}
+
+.badge-count {
+  font-family: var(--font-technical);
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--accent-gold);
+  color: var(--bg-primary);
+  padding: 1px 8px;
+  border-radius: 12px;
+  box-shadow: 0 0 8px rgba(255, 184, 0, 0.2);
+}
+
+.media-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 스크롤바 디자인 */
+.media-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.media-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.media-list::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+}
+
+.media-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 184, 0, 0.2);
+}
+
+/* --- 미디어 아이템 카드 --- */
+.media-item {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-glass);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 10px 12px;
+  gap: 8px;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.media-item:hover {
+  border-color: var(--border-neon-gold);
+  background: rgba(23, 23, 32, 0.9);
+  box-shadow: 0 4px 12px rgba(255, 184, 0, 0.03);
+}
+
+.media-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.media-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.media-title {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-primary);
+  word-break: break-all;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.badge-group {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.media-type-badge {
+  font-size: 8px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+/* 타입별 색상 커스텀 */
+.media-type-badge.m3u8 {
+  background: rgba(255, 184, 0, 0.08);
+  border: 1px solid var(--border-neon-gold);
+  color: var(--accent-gold);
+}
+
+.media-type-badge.mp4 {
+  background: rgba(0, 240, 255, 0.08);
+  border: 1px solid var(--border-neon-blue);
+  color: var(--accent-blue);
+}
+
+.media-type-badge.readystream {
+  background: rgba(168, 85, 247, 0.08);
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  color: #C084FC;
+}
+
+.media-type-badge.youtube {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #F87171;
+}
+
+.media-type-badge.vimeo {
+  background: rgba(14, 165, 233, 0.08);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  color: #38BDF8;
+}
+
+.media-type-badge.twitter {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #E2E8F0;
+}
+
+.media-source-badge {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--border-glass);
+}
+
+/* 버튼 제어 영역 */
+.media-action-row {
+  display: flex;
+  gap: 6px;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  height: 28px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+.btn-primary {
+  background-color: var(--accent-gold);
+  color: var(--bg-primary);
+  box-shadow: 0 2px 6px rgba(255, 184, 0, 0.15);
+}
+
+.btn-primary:hover {
+  background-color: #E6A600;
+  box-shadow: 0 4px 10px rgba(255, 184, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background-color: transparent;
+  border: 1px solid var(--border-glass);
+  color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+/* --- 탐색 중 상태 (Radar Scanner) --- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  text-align: center;
+  padding: 30px;
+  gap: 12px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  border: 1px dashed var(--border-glass);
+  min-height: 220px;
+}
+
+.radar-scanner {
+  position: relative;
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-wave {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border: 1px solid var(--accent-gold);
+  border-radius: 50%;
+  opacity: 0;
+  animation: radar-pulse 3s infinite linear;
+}
+
+.radar-wave:nth-child(2) {
+  animation-delay: 1s;
+}
+
+.radar-wave:nth-child(3) {
+  animation-delay: 2s;
+}
+
+@keyframes radar-pulse {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+.empty-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+}
+
+.empty-desc {
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  max-width: 220px;
+}
+
+/* --- 푸터 스타일 --- */
+.footer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-t: 1px solid var(--border-glass);
+}
+
+.notice-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: rgba(0, 240, 255, 0.02);
+  border: 1px dashed var(--border-neon-blue);
+  padding: 8px 10px;
+  border-radius: 6px;
+}
+
+.info-icon {
+  font-size: 10px;
+}
+
+.notice-text {
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--accent-blue);
+}
+
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.version, .copyright {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+/* --- 실시간 다운로드 프로그레스 모달 --- */
+.progress-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 7, 9, 0.85);
+  backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+.progress-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.progress-card {
+  width: 80%;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-neon-gold);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 8px 32px rgba(255, 184, 0, 0.1);
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.progress-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.progress-percentage {
+  font-family: var(--font-technical);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent-gold);
+  text-shadow: 0 0 6px var(--accent-gold-glow);
+}
+
+.progress-bar-bg {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.02);
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-gold), #FFD600);
+  border-radius: 3px;
+  box-shadow: 0 0 8px var(--accent-gold-glow);
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.progress-status {
+  font-size: 10px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  max-height: 80px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 스크롤바 디자인 (상태창 오버플로우 대비) */
+.progress-status::-webkit-scrollbar {
+  width: 3px;
+}
+.progress-status::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+/* 에러 상태 스타일 */
+.progress-card.error {
+  border-color: #FF4444;
+  box-shadow: 0 8px 32px rgba(255, 68, 68, 0.15);
+}
+
+.progress-card.error .progress-title,
+.progress-card.error .progress-percentage {
+  color: #FF4444;
+  text-shadow: 0 0 6px rgba(255, 68, 68, 0.35);
+}
+
+.progress-card.error .progress-bar-fill {
+  background: linear-gradient(90deg, #FF4444, #FF7777);
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.35);
+}
+
+.progress-card.error .progress-status {
+  color: #FFAAAA;
+}
+
+/* 범용 클래스 */
+.hidden {
+  display: none !important;
+}

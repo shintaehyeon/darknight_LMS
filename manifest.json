@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "다크나이트 - LMS 동영상 다운로더",
+  "version": "1.0.0",
+  "description": "LMS 강의실 및 웹 페이지에서 M3U8/MP4 동영상을 자동으로 감지하여 간편하게 추출하고 다운로드합니다.",
+  "permissions": [
+    "webRequest",
+    "declarativeNetRequest",
+    "activeTab",
+    "scripting",
+    "downloads",
+    "storage",
+    "cookies"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "다크나이트 실행"
+  },
+  "icons": {
+    "16": "icon.png",
+    "48": "icon.png",
+    "128": "icon.png"
+  }
+}

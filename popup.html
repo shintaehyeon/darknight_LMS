@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>다크나이트 - LMS 미디어 추출기</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 헤더 영역 -->
+    <header class="header">
+      <div class="logo-area">
+        <div class="glowing-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <div class="title-wrapper">
+          <h1 class="title">DARK KNIGHT</h1>
+          <span class="subtitle">LMS 미디어 익스트랙터</span>
+        </div>
+      </div>
+      <div class="system-status">
+        <span class="status-dot animate-pulse"></span>
+        <span class="status-text">네트워크 스니퍼 가동중</span>
+      </div>
+    </header>
+
+    <!-- 현재 페이지 정보 -->
+    <section class="active-page-section">
+      <div class="label-row">
+        <span class="section-label">활성 페이지</span>
+        <span id="domain-badge" class="domain-badge">대기 중</span>
+      </div>
+      <div id="page-title" class="page-title-text">LMS 웹사이트 분석을 시작합니다...</div>
+    </section>
+
+    <!-- 실시간 미디어 리스트 -->
+    <main class="media-container">
+      <div class="section-header-row">
+        <h2 class="section-title">감지된 미디어 목록</h2>
+        <span id="media-count" class="badge-count">0</span>
+      </div>
+
+      <!-- 리스트 동적 삽입 영역 -->
+      <div id="media-list" class="media-list">
+        <!-- 기본 로딩/탐색 상태 -->
+        <div class="empty-state">
+          <div class="radar-scanner">
+            <div class="radar-wave"></div>
+            <div class="radar-wave"></div>
+            <div class="radar-wave"></div>
+          </div>
+          <p class="empty-title">미디어 스캔 중...</p>
+          <p class="empty-desc">강의 비디오를 재생하거나, 페이지를 둘러보시면 다크나이트가 미디어를 자동으로 수집합니다.</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- 하단 유용한 팁 및 저작권 표시 -->
+    <footer class="footer">
+      <div class="notice-box">
+        <span class="info-icon">💡</span>
+        <p class="notice-text">
+          다크나이트는 이제 브라우저 자체적으로 HLS M3U8 동영상 조각을 고성능으로 실시간 병합 및 1클릭 자동 다운로드합니다!
+        </p>
+      </div>
+      <div class="footer-bottom">
+        <span class="version">Version 1.0.0</span>
+        <span class="copyright">© 2026 Dark Knight</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- HLS 실시간 다운로드 프로그레스 모달 -->
+  <div id="progress-overlay" class="progress-overlay hidden">
+    <div class="progress-card">
+      <div class="progress-header">
+        <span class="progress-title">실시간 스트리밍 추출 중</span>
+        <span id="progress-percentage" class="progress-percentage">0%</span>
+      </div>
+      <div class="progress-bar-bg">
+        <div id="progress-bar-fill" class="progress-bar-fill" style="width: 0%;"></div>
+      </div>
+      <div id="progress-status" class="progress-status">비디오 데이터를 안전하게 수집하고 있습니다...</div>
+      <button id="progress-close-btn" class="btn btn-secondary hidden" style="margin-top: 10px; width: 100%;">닫기</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
