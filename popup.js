@@ -345,7 +345,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         } else {
           // 일반 MP4 등 원본 다운로드 실행
-          if (url.includes('hducc.handong.edu') || url.includes('lms.handong.edu')) {
+          if (url.includes('handong') || url.includes('naverncp')) {
             // 백그라운드 우회 다운로더 가동!
             overlay.classList.remove('hidden');
             progressCard.classList.remove('error');

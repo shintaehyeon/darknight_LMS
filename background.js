@@ -539,8 +539,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const extensionOrigin = chrome.runtime.getURL('').slice(0, -1);
         const ruleId = 2001;
         let refererHeaderValue = referer;
-        if (urlObj.hostname.includes('hducc.handong.edu')) {
-          refererHeaderValue = "https://hducc.handong.edu/index.php/vod/view_page/";
+        let originHeaderValue = urlObj.origin;
+        if (urlObj.hostname.includes('hducc.handong.edu') || urlObj.hostname.includes('naverncp.com')) {
+          refererHeaderValue = "https://hducc.handong.edu/";
+          originHeaderValue = "https://hducc.handong.edu";
         } else if (!refererHeaderValue) {
           refererHeaderValue = urlObj.origin + "/";
         }
@@ -551,7 +553,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             type: "modifyHeaders",
             requestHeaders: [
               { header: "Referer", operation: "set", value: refererHeaderValue },
-              { header: "Origin", operation: "set", value: urlObj.origin },
+              { header: "Origin", operation: "set", value: originHeaderValue },
               { header: "Cookie", operation: "set", value: cookieStr }
             ],
             responseHeaders: [
