@@ -538,7 +538,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // 3. 동적 DNR 규칙 추가 ( fetch 시 쿠키 및 레퍼러 완벽 주입 )
         const extensionOrigin = chrome.runtime.getURL('').slice(0, -1);
         const ruleId = 2001;
-        const refererHeaderValue = referer || "https://hducc.handong.edu/index.php/vod/view_page/";
+        let refererHeaderValue = referer;
+        if (urlObj.hostname.includes('hducc.handong.edu')) {
+          refererHeaderValue = "https://hducc.handong.edu/index.php/vod/view_page/";
+        } else if (!refererHeaderValue) {
+          refererHeaderValue = urlObj.origin + "/";
+        }
         const rule = {
           id: ruleId,
           priority: 100,
