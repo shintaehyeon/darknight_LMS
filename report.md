@@ -83,6 +83,31 @@ This report analyzes the multi-layered security infrastructure (CORS, CSP, SameS
   - The background worker then relays this buffer to the **top-level main frame (`frameId: 0`)** content script.
   - The main frame script, which is free of sandboxed iframe limitations, instantiates a virtual `ObjectURL` and programmatically triggers the `click()` event on a temporary `<a>` element, successfully writing the uncompromised media binary straight to the user's local disk.
 
+### 1.5 15바이트 다운로드 실패 에러 분석 및 해결 (Resolving the 15-Byte Download Issue)
+* **[KR] 발단**: 네이버 클라우드 CDN(`naverncp.com`) 서버에 호스팅된 MP4 동영상을 다운로드할 때 파일의 크기가 단 **15B(15바이트)**로 내려받아지며 동영상이 재생되지 않는 버그가 발생했습니다. 해당 파일을 텍스트 에디터로 열어본 결과 `Access Denied`라는 한 줄짜리 오류 텍스트가 확인되었습니다. (사용자는 화면상의 15B 표기를 15MB로 간혹 오인하였습니다.)
+* **[KR] 원인**: 네이버 CDN 서버는 비인증 핫링크를 차단하기 위해 `Referer` 헤더 값을 검증합니다. 
+  1. HLS 스트림이 아닌 직접 MP4 파일 다운로드 시, 팝업 및 컨텐트 스크립트에서 백그라운드 서비스 워커의 `startBackgroundFetch`(자체 fetch) 방식을 가동하도록 구현되어 있었습니다. 하지만 dynamic DNR 규칙(Rule 2001)이 백그라운드 서비스 워커 자체에서 발생하는 `fetch` 요청을 가로채거나 헤더를 조작하는 데 타이밍 이슈나 제한이 있었습니다.
+  2. 컨텐트 스크립트나 백그라운드에서 `chrome.downloads.download` API를 직접적으로 호출하여 처리할 때도, 요청에 `Referer: https://hducc.handong.edu/`가 누락된 채 전송되어 CDN 서버가 `403 Forbidden`을 반환했습니다.
+  3. 크롬 브라우저의 네이티브 다운로드 API(`chrome.downloads.download`)는 서버가 `403 Forbidden` 등의 에러 상태를 반환하더라도 해당 에러 응답 바디(`Access Denied\r\n` - 15바이트)를 파일로 그대로 저장하고 다운로드를 "성공/완료" 처리하는 특성을 가지고 있었기 때문입니다.
+  4. 추가로 기존 파일명 포맷팅 중 타이틀에 `.mp4`가 포함되어 있을 경우 저장 파일명이 `[DarkKnight]_main_(...).mp4.mp4`와 같이 중복 확장자로 표기되는 버그가 함께 존재했습니다.
+* **[KR] 해결 매커니즘**:
+  - **DNR 규칙 1003 영구 추가**: 네이버 CDN(`naverncp.com`) 도메인을 필터링하는 전용 규칙(ID: 1003)을 `background.js` 초기화 시 등록하도록 하여, 브라우저가 보내는 모든 네이버 CDN 관련 요청(다운로드 요청 포함)에 `Referer: https://hducc.handong.edu/`와 `Origin`을 강제로 자동 주입하도록 구현하였습니다.
+  - **크롬 네이티브 다운로더 전환**: 메모리에 수백 MB의 동영상 데이터를 올려 전송하는 무겁고 불안정한 `startBackgroundFetch` 대신, 크롬의 네이티브 다운로드 API(`chrome.downloads.download`)로 MP4 요청을 단일화하였습니다.
+  - **샌드박스 우회 우아한 우회 경로**: `content.js`가 iframe 내에서 동영상 실주소를 역추적(DOM 분석)한 후, 만약 MP4 주소일 경우 무겁게 fetch하지 않고 즉시 백그라운드 메시지(`triggerDirectDownload`)를 발송하여 네이티브 다운로드를 실행하도록 변경하였습니다. 이로써 Iframe Sandbox 및 CSP 차단 정책에 영향을 받지 않고 즉시 로컬 디스크로 파일 저장이 트리거됩니다.
+  - **중복 확장자 제거**: 정규식 `.replace(/\.(mp4|ts|m3u8)$/i, '')`를 활용하여 원본 파일명에 이미 확장자가 포함되어 있더라도 최종 저장 파일에 확장자가 중복되지 않도록 깔끔하게 정돈하였습니다.
+
+* **[EN] The Issue**: MP4 videos hosted on Naver Cloud CDN (`naverncp.com`) downloaded as tiny **15-byte** files that were completely unplayable. Inspected as plain text, they contained the string `Access Denied`.
+* **[EN] The Cause**: Naver CDN enforces hotlinking protection checking the `Referer` header. 
+  1. Background service worker `fetch()` calls under dynamic DNR dynamic rules (Rule 2001) were bypassed or failed to append headers correctly due to security sandbox constraints.
+  2. `chrome.downloads.download` API calls made directly without custom rules sent requests without the proper `Referer` header, prompting `403 Forbidden` responses.
+  3. Chrome's download manager writes the error response body (`Access Denied\r\n` - 15 bytes) directly to the destination path and flags the transaction as "successful."
+  4. In addition, string concatenations led to duplicate extensions like `.mp4.mp4`.
+* **[EN] Resolution**:
+  - **Persistent DNR Rule 1003**: Appended a persistent dynamic rule (ID: 1003) for `naverncp.com` to inject `Referer: https://hducc.handong.edu/` on all outgoing matches.
+  - **Direct Chrome Download routing**: Bypassed unstable in-memory buffering by sending all direct MP4 downloads to `chrome.downloads.download`.
+  - **Sandbox Bypass Simplification**: The iframe content script detects the direct MP4 source and relays it to the background via `triggerDirectDownload`, avoiding iframe CSP checks and sandbox blockages.
+  - **Sanitized Filenames**: Used `.replace(/\.(mp4|ts|m3u8)$/i, '')` to eliminate double extension errors.
+
 ---
 
 ## 2. 심층 웹 보안 기술 개념 정리 (Deep Dive into Web Security Concepts)
@@ -99,6 +124,7 @@ This section provides an educational reference for essential web security concep
 | **SameSite Cookies** | 타 사이트 간의 요청 시 인증 세션 쿠키 탈락 (`Lax`, `Strict`) | `chrome.cookies` API로 세션 쿠키를 직접 긁어모아 dynamic DNR 규칙을 통해 요청 패킷에 직접 주입 |
 | **Iframe Sandbox** | 임베디드 프레임의 권한 제한 및 임의의 다운로드(`downloads`) 행위 차단 | `ArrayBuffer` 형태로 변환 후 메인 프레임(`frameId: 0`)으로 릴레이 송출하여 상단 앵커 다운로드 |
 | **Mixed Content** | HTTPS(보안) 페이지에서 HTTP(비보안) 리소스 요청 시 강제 차단 | 감지된 모든 비디오 주소 프로토콜을 정규식 검사를 통해 실행 전 `https://`로 강제 표준화 |
+| **CDN Hotlinking** | 비인가 도메인으로부터의 미디어 링크를 방지하기 위해 Referer 검증 | declarativeNetRequest 규칙 1003을 등록하여 크롬 다운로드 매니저 요청에도 Referer 강제 주입 |
 
 ---
 

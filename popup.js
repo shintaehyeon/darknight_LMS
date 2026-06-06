@@ -304,9 +304,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                   }, { frameId: 0 }, (fallbackRes) => {
                     if (chrome.runtime.lastError) {
                       console.error("메인 프레임 전송 실패:", chrome.runtime.lastError);
-                      // 최후의 수단으로 백그라운드 다운로더 실행
+                      // 최후의 수단으로 백그라운드 또는 네이티브 다운로더 실행
                       if (secureTargetUrl.toLowerCase().includes('.mp4')) {
-                        downloadMp4FromPopup(secureTargetUrl, title);
+                        const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+                        const cleanTitle = safeTitle.replace(/\.mp4$/i, '');
+                        const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+                        const filename = `${prefix}_${cleanTitle}.mp4`;
+
+                        chrome.downloads.download({
+                          url: secureTargetUrl,
+                          filename: filename,
+                          saveAs: true
+                        }, (downloadId) => {
+                          if (chrome.runtime.lastError) {
+                            console.error("다운로드 에러:", chrome.runtime.lastError);
+                            alert("다운로드 실행 도중 오류가 발생했습니다.");
+                          }
+                        });
                       } else {
                         overlay.classList.remove('hidden');
                         progressCard.classList.remove('error');
@@ -345,38 +359,26 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         } else {
           // 일반 MP4 등 원본 다운로드 실행
-          if (url.includes('handong') || url.includes('naverncp')) {
-            // 백그라운드 우회 다운로더 가동!
-            overlay.classList.remove('hidden');
-            progressCard.classList.remove('error');
-            closeBtn.classList.add('hidden');
-            fill.style.width = '0%';
-            percent.textContent = '0%';
-            status.textContent = '백그라운드 보안 우회 다운로더 가동 중...';
-
-            let secureUrl = url;
-            if (secureUrl.startsWith('http://')) {
-              secureUrl = secureUrl.replace('http://', 'https://');
-            }
-
-            chrome.runtime.sendMessage({
-              action: 'startBackgroundFetch',
-              url: secureUrl,
-              referer: activeTab.url,
-              title: title,
-              tabId: activeTab.id
-            });
-          } else {
-            chrome.downloads.download({
-              url: url,
-              saveAs: true
-            }, (downloadId) => {
-              if (chrome.runtime.lastError) {
-                console.error("다운로드 에러:", chrome.runtime.lastError);
-                alert("다운로드 실행 도중 오류가 발생했습니다. '주소 복사' 후 외부 다운로더를 활용해 주세요.");
-              }
-            });
+          let secureUrl = url;
+          if (secureUrl.startsWith('http://')) {
+            secureUrl = secureUrl.replace('http://', 'https://');
           }
+
+          const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+          const cleanTitle = safeTitle.replace(/\.mp4$/i, '');
+          const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+          const filename = `${prefix}_${cleanTitle}.mp4`;
+
+          chrome.downloads.download({
+            url: secureUrl,
+            filename: filename,
+            saveAs: true
+          }, (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error("다운로드 에러:", chrome.runtime.lastError);
+              alert("다운로드 실행 도중 오류가 발생했습니다. '주소 복사' 후 외부 다운로더를 활용해 주세요.");
+            }
+          });
         }
       });
     });

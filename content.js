@@ -169,15 +169,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("ReadyStream 다이렉트 소스 추적 완료:", targetUrl);
 
     if (targetUrl.toLowerCase().includes('.mp4') || (!targetUrl.toLowerCase().includes('.m3u8') && extractedUrl)) {
-      // MP4 직접 다운로드 실행 (동일 출처 Fetch 우회기동!)
-      downloadMp4FromContent(targetUrl, message.title)
-        .then(() => {
-          sendResponse({ success: true, message: '동일 출처 MP4 다운로드 프로세스 가동 완료' });
-        })
-        .catch((err) => {
-          console.error("MP4 다운로드 가동 실패:", err);
-          sendResponse({ success: false, error: err.message });
-        });
+      // MP4 직접 다운로드 실행 (백그라운드 위임하여 네이티브 다운로드!)
+      chrome.runtime.sendMessage({
+        action: 'triggerDirectDownload',
+        url: targetUrl,
+        title: message.title
+      }, (response) => {
+        sendResponse(response);
+      });
     } else {
       // HLS (.m3u8) 스트리밍 케이스: 병렬 청크 분할 고속 수집 머지 가동!
       downloadHlsStreamFromContent(targetUrl, message.title)
@@ -196,8 +195,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const blobUrl = URL.createObjectURL(blob);
       
       const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+      const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
       const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
-      const filename = `${prefix}_${safeTitle}.${extension}`;
+      const filename = `${prefix}_${cleanTitle}.${extension}`;
 
       const downloadAnchor = document.createElement('a');
       downloadAnchor.href = blobUrl;

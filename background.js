@@ -69,12 +69,35 @@ async function setupNetRequestRules() {
           "media", "websocket", "other"
         ]
       }
+    },
+    {
+      id: 1003,
+      priority: 1, // 네이버 클라우드 CDN MP4 및 미디어 요청 처리 (15바이트 에러 해결)
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: [
+          { header: "Referer", operation: "set", value: "https://hducc.handong.edu/" },
+          { header: "Origin", operation: "set", value: "https://hducc.handong.edu" }
+        ],
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: extensionOrigin },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||naverncp.com",
+        resourceTypes: [
+          "main_frame", "sub_frame", "stylesheet", "script", "image", 
+          "font", "object", "xmlhttprequest", "ping", "csp_report", 
+          "media", "websocket", "other"
+        ]
+      }
     }
   ];
 
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [1001, 1002],
+      removeRuleIds: [1001, 1002, 1003],
       addRules: rules
     });
     console.log("다크나이트 - Referer/Origin 우회 네트워크 규칙 등록 완료!");
@@ -440,8 +463,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   else if (message.action === 'triggerDirectDownload') {
     const { url, title } = message;
     const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
     const extension = url.toLowerCase().includes('.mp4') ? 'mp4' : 'ts';
-    const filename = `[ReadyStream]_${safeTitle}.${extension}`;
+    const filename = `[ReadyStream]_${cleanTitle}.${extension}`;
 
     chrome.downloads.download({
       url: url,
