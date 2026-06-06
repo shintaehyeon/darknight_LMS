@@ -169,14 +169,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log("ReadyStream 다이렉트 소스 추적 완료:", targetUrl);
 
     if (targetUrl.toLowerCase().includes('.mp4') || (!targetUrl.toLowerCase().includes('.m3u8') && extractedUrl)) {
-      // MP4 직접 다운로드 실행 (백그라운드 위임하여 네이티브 다운로드!)
+      // MP4 직접 다운로드 실행 (백그라운드 위임하여 우회 다운로드!)
       chrome.runtime.sendMessage({
-        action: 'triggerDirectDownload',
+        action: 'startBackgroundFetch',
         url: targetUrl,
+        referer: window.location.href,
         title: message.title
-      }, (response) => {
-        sendResponse(response);
       });
+      sendResponse({ success: true, message: '백그라운드 MP4 다운로드 프로세스 가동 완료' });
     } else {
       // HLS (.m3u8) 스트리밍 케이스: 병렬 청크 분할 고속 수집 머지 가동!
       downloadHlsStreamFromContent(targetUrl, message.title)

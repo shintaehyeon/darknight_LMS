@@ -570,16 +570,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else if (!refererHeaderValue) {
           refererHeaderValue = urlObj.origin + "/";
         }
+        const requestHeaders = [
+          { header: "Referer", operation: "set", value: refererHeaderValue },
+          { header: "Origin", operation: "set", value: originHeaderValue }
+        ];
+        if (cookieStr) {
+          requestHeaders.push({ header: "Cookie", operation: "set", value: cookieStr });
+        }
+
         const rule = {
           id: ruleId,
           priority: 100,
           action: {
             type: "modifyHeaders",
-            requestHeaders: [
-              { header: "Referer", operation: "set", value: refererHeaderValue },
-              { header: "Origin", operation: "set", value: originHeaderValue },
-              { header: "Cookie", operation: "set", value: cookieStr }
-            ],
+            requestHeaders: requestHeaders,
             responseHeaders: [
               { header: "Access-Control-Allow-Origin", operation: "set", value: extensionOrigin },
               { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
