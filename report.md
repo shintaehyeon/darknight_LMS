@@ -106,6 +106,17 @@ This report analyzes the multi-layered security infrastructure (CORS, CSP, SameS
   - **Direct Top-Level Main Frame (frameId: 0) Downloading (Bypassing Sandbox & Serialization Limits)**: Initially, the script fetched video segments inside the player's sandboxed iframe and relayed the massive binary `ArrayBuffer` via `chrome.runtime.sendMessage` to the top frame. However, Chrome's message serialization truncates/corrupts huge buffers, resulting in corrupted files. To bypass both the structured clone size limit and the sandboxed iframe download disallowance, the extension now delegates all HLS and MP4 download requests directly to the main frame (`frameId: 0`). The main frame fetches the stream directly and triggers the native file saving locally without any buffer passing, ensuring a 100% playable, clean video file.
   - **Sanitized Filenames**: Used `.replace(/\.(mp4|ts|m3u8)$/i, '')` to eliminate double extension errors.
 
+### 1.6 왜 갑자기 해결되었는가? (Why it suddenly worked)
+* **[KR] 핵심 원인**: 이전 버전에서는 iframe 내부에서 다운로드한 파일 바이너리 데이터(`ArrayBuffer`)를 `chrome.runtime.sendMessage` API를 통해 백그라운드와 메인 화면으로 전달하여 저장했습니다. 크롬 확장 프로그램 구조상 메시지 전송 채널은 대용량 파일(수십~수백 MB)의 직렬화 복사를 지원하지 못해 데이터가 중간에 잘리거나 깨져 다운로드된 비디오가 재생되지 않았습니다. 메인 프레임(`frameId: 0`)이 직접 fetch하여 브라우저에 임시로 쌓은 후 가상 앵커를 클릭하는 **Direct Top-Frame Download** 방식으로 전환하고, 이를 위해 DNR 규칙 1004~1006을 통한 CORS 승인 헤더 주입을 적용하면서 대용량 메시지 전송 자체가 생략되어 파일 깨짐 없이 완벽하게 정상 재생되기 시작한 것입니다.
+* **[EN] Key Cause**: Previously, the large binary buffer was passed across extensions via `chrome.runtime.sendMessage`, which failed due to Chrome's structured clone memory limits on message channels, causing corrupted files. Switching to a direct top-frame fetch by `frameId: 0` alongside dynamic CORS DNR headers eliminated the message-passing copy step, allowing files to be written natively without corruption.
+
+### 1.7 강의 재생 시간(10분 3초)과 다운로드 영상 시간(3분 44초)이 다른 이유 (Why the duration differs)
+* **[KR] 현상 분석**: LMS 페이지에는 `재생 시간 10분 3초`로 표시되는데 다운로드한 MP4 파일의 재생 시간은 `3분 44초`로 나오는 현상이 있습니다.
+  1. **실제 비디오 파일 확인**: 제공해주신 F12 개발자 도구의 Network 탭 및 실제 화면의 플레이어 재생 바를 확인해 보면, 브라우저가 비디오 서버로부터 로드한 실제 영상 파일(`main_(662e3858-...).mp4`)의 고유 재생 시간 역시 정확하게 **`3분 44초`**입니다.
+  2. **학습 인정 시간 설정**: 대학교 LMS 시스템 상에서 교수가 설정해 둔 '출석 인정을 위한 최소 학습 필요 시간(또는 권장 학습 시간)'이 10분 3초로 등록되어 있으나, 실제 업로드된 영상 파일 자체는 3분 44초 분량인 경우입니다.
+  3. **결론**: 다운로더가 영상을 중간에 자르고 일부분만 다운로드한 것이 아니라, **서버에 호스팅된 실제 영상 파일 전체를 100% 완벽하게 소장**한 것입니다.
+* **[EN] Duration Discrepancy**: The LMS page shows a required study time of `10m 3s`, but the seek bar of the player and the fetched file `main_(...).mp4` are natively `3m 44s`. The university LMS sets a required attendance duration longer than the actual video file. The extension has successfully downloaded 100% of the authentic video asset.
+
 ---
 
 ## 2. 심층 웹 보안 기술 개념 정리 (Deep Dive into Web Security Concepts)
