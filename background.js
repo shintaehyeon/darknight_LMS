@@ -92,15 +92,75 @@ async function setupNetRequestRules() {
           "media", "websocket", "other"
         ]
       }
+    },
+    {
+      id: 1004,
+      priority: 2, // hducc.handong.edu에서 호출한 naverncp.com CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "https://hducc.handong.edu" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||naverncp.com",
+        initiatorDomains: ["hducc.handong.edu"],
+        resourceTypes: [
+          "main_frame", "sub_frame", "stylesheet", "script", "image", 
+          "font", "object", "xmlhttprequest", "ping", "csp_report", 
+          "media", "websocket", "other"
+        ]
+      }
+    },
+    {
+      id: 1005,
+      priority: 2, // lms.handong.edu에서 호출한 naverncp.com CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "https://lms.handong.edu" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||naverncp.com",
+        initiatorDomains: ["lms.handong.edu"],
+        resourceTypes: [
+          "main_frame", "sub_frame", "stylesheet", "script", "image", 
+          "font", "object", "xmlhttprequest", "ping", "csp_report", 
+          "media", "websocket", "other"
+        ]
+      }
+    },
+    {
+      id: 1006,
+      priority: 2, // lms.handong.edu에서 호출한 hducc.handong.edu CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "https://lms.handong.edu" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||hducc.handong.edu",
+        initiatorDomains: ["lms.handong.edu"],
+        resourceTypes: [
+          "main_frame", "sub_frame", "stylesheet", "script", "image", 
+          "font", "object", "xmlhttprequest", "ping", "csp_report", 
+          "media", "websocket", "other"
+        ]
+      }
     }
   ];
 
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [1001, 1002, 1003],
+      removeRuleIds: [1001, 1002, 1003, 1004, 1005, 1006],
       addRules: rules
     });
-    console.log("다크나이트 - Referer/Origin 우회 네트워크 규칙 등록 완료!");
+    console.log("다크나이트 - Referer/Origin 및 CORS 우회 네트워크 규칙 등록 완료!");
   } catch (err) {
     console.error("DNR 규칙 등록 오류:", err);
   }
@@ -418,6 +478,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   else if (message.action === 'clearActiveDownload') {
     activeDownloadSession = null;
+    sendResponse({ success: true });
+  }
+
+  else if (message.action === 'registerDownloadSession') {
+    activeDownloadSession = {
+      tabId: tabId,
+      url: message.url,
+      title: message.title,
+      progress: 0,
+      statusText: '다운로드 준비 중...',
+      isError: false,
+      isComplete: false,
+      errorMsg: ''
+    };
+    sendResponse({ success: true });
+  }
+
+  else if (message.action === 'hlsDownloadProgress') {
+    // content.js 또는 타 스크립트에서 보낸 진행 상황을 백그라운드 세션에 동기화
+    if (activeDownloadSession) {
+      activeDownloadSession.progress = message.progress;
+      activeDownloadSession.statusText = message.statusText;
+      activeDownloadSession.isError = message.isError;
+      activeDownloadSession.isComplete = message.isComplete;
+      activeDownloadSession.errorMsg = message.errorMsg;
+    }
     sendResponse({ success: true });
   }
 
