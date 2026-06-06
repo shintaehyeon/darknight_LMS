@@ -13,6 +13,9 @@ const detectedMedia = {};
 // 탭별로 마지막으로 기록된 기본 주소(Base URL)
 const lastBaseUrls = {};
 
+// 현재 진행 중인 백그라운드 다운로드 세션 상태 객체
+let activeDownloadSession = null;
+
 // 시작 시 또는 확장 프로그램 설치 시 declarativeNetRequest 규칙 동적 등록 (CORS 및 Referer 보안 완벽 우회!)
 chrome.runtime.onInstalled.addListener(() => {
   setupNetRequestRules();
@@ -227,12 +230,178 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   delete lastBaseUrls[tabId];
 });
 
+/**
+ * 일반화된 HLS (M3U8) 실시간 자동 분할 다운로드 및 바이너리 머지 처리기 (백그라운드 서비스 워커 버전)
+ */
+async function downloadHlsInBackground(m3u8Url, title, tabId) {
+  const session = {
+    tabId,
+    url: m3u8Url,
+    title,
+    progress: 0,
+    statusText: 'M3U8 플레이리스트 분석 중...',
+    isError: false,
+    isComplete: false,
+    errorMsg: ''
+  };
+  activeDownloadSession = session;
+
+  const updateProgress = (progress, statusText, isError = false, isComplete = false, errorMsg = '') => {
+    session.progress = progress;
+    session.statusText = statusText;
+    session.isError = isError;
+    session.isComplete = isComplete;
+    session.errorMsg = errorMsg;
+
+    chrome.runtime.sendMessage({
+      action: 'hlsDownloadProgress',
+      progress,
+      statusText,
+      isError,
+      isComplete,
+      errorMsg
+    }).catch(() => {
+      // 팝업이 닫혀 있을 때 발생하는 에러 무시
+    });
+  };
+
+  try {
+    updateProgress(5, 'M3U8 마스터 플레이리스트 파일 수집 중...');
+
+    // 1. M3U8 메인 주소 파싱
+    const response = await fetch(m3u8Url);
+    if (!response.ok) throw new Error(`M3U8 플레이리스트 요청 실패 (상태 코드: ${response.status})`);
+    const text = await response.text();
+
+    const baseUrl = m3u8Url.substring(0, m3u8Url.lastIndexOf('/') + 1);
+    const lines = text.split('\n');
+    const tsUrls = [];
+
+    // 2. 플레이리스트 내의 TS 비디오 청크 리스트 추출
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line && !line.startsWith('#')) {
+        let tsUrl = line;
+        if (!line.startsWith('http://') && !line.startsWith('https://')) {
+          if (line.startsWith('/')) {
+            const urlObj = new URL(m3u8Url);
+            tsUrl = urlObj.origin + line;
+          } else {
+            tsUrl = baseUrl + line;
+          }
+        }
+        tsUrls.push(tsUrl);
+      }
+    }
+
+    // 3. 다중 화질 마스터 플레이리스트 대응
+    if (tsUrls.length === 0) {
+      const subPlaylists = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line && !line.startsWith('#') && (line.toLowerCase().includes('.m3u8') || line.toLowerCase().includes('m3u8'))) {
+          let subUrl = line;
+          if (!line.startsWith('http://') && !line.startsWith('https://')) {
+            subUrl = baseUrl + line;
+          }
+          subPlaylists.push(subUrl);
+        }
+      }
+
+      if (subPlaylists.length > 0) {
+        updateProgress(10, '고화질 서브 스트리밍 리스트 감지, 주소 전환 중...');
+        return downloadHlsInBackground(subPlaylists[0], title, tabId);
+      }
+
+      throw new Error('M3U8 스트리밍 내에서 분할 비디오 조각(TS)을 찾지 못했습니다.');
+    }
+
+    // 4. TS 파일 다운로드 가동 (5개 채널 동시 고속 다운로드)
+    const total = tsUrls.length;
+    const tsChunks = new Array(total);
+    updateProgress(15, `비디오 조각 다운로드 시작... (총 ${total}개 파편)`);
+
+    const concurrencyLimit = 5;
+    for (let i = 0; i < tsUrls.length; i += concurrencyLimit) {
+      // 세션이 도중에 리셋되었는지 검증
+      if (activeDownloadSession !== session) return;
+
+      const batch = tsUrls.slice(i, i + concurrencyLimit);
+      const promises = batch.map((url, index) => {
+        const currentIndex = i + index;
+        return fetch(url)
+          .then(res => {
+            if (!res.ok) throw new Error(`비디오 파편 다운로드 오류 (${res.status})`);
+            return res.arrayBuffer();
+          })
+          .then(buffer => {
+            tsChunks[currentIndex] = new Uint8Array(buffer);
+            
+            const completed = tsChunks.filter(Boolean).length;
+            const progressPct = Math.round((completed / total) * 83) + 15; // 15% ~ 98% 진행
+            
+            updateProgress(progressPct, `비디오 파편 수집 중: ${completed} / ${total} 개 완료`);
+          });
+      });
+
+      await Promise.all(promises);
+    }
+
+    // 5. 바이너리 스트림 고속 병합
+    updateProgress(98, '수집된 비디오 파편 고속 병합 중...');
+    
+    const totalLength = tsChunks.reduce((acc, chunk) => acc + (chunk ? chunk.length : 0), 0);
+    const mergedArray = new Uint8Array(totalLength);
+    let offset = 0;
+    
+    for (const chunk of tsChunks) {
+      if (chunk) {
+        mergedArray.set(chunk, offset);
+        offset += chunk.length;
+      }
+    }
+
+    // 6. 브라우저 최종 파일 다운로드 트리거 (.ts 포맷 무손실 원본 저장)
+    updateProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
+    
+    chrome.tabs.sendMessage(tabId, {
+      action: 'executeBlobDownload',
+      arrayBuffer: mergedArray.buffer,
+      title: title,
+      extension: 'ts'
+    }, { frameId: 0 }, (response) => {
+      // 완료 성공
+    });
+    
+    updateProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
+
+  } catch (err) {
+    console.error("백그라운드 HLS 다운로드 실패:", err);
+    updateProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+  }
+}
+
 // 팝업 및 컨텐트 스크립트 통신 처리
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = message.tabId || (sender.tab && sender.tab.id);
 
   if (message.action === 'getMediaList') {
     sendResponse({ mediaList: detectedMedia[tabId] || [] });
+  } 
+  
+  else if (message.action === 'getActiveDownload') {
+    sendResponse({ activeSession: activeDownloadSession });
+  }
+
+  else if (message.action === 'clearActiveDownload') {
+    activeDownloadSession = null;
+    sendResponse({ success: true });
+  }
+
+  else if (message.action === 'startHlsBackgroundFetch') {
+    const { url, title } = message;
+    downloadHlsInBackground(url, title, tabId);
+    sendResponse({ success: true, message: '백그라운드 HLS 다운로드 프로세스 시작됨' });
   } 
   
   else if (message.action === 'addDomMedia') {
@@ -313,6 +482,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     
     (async () => {
       const sendProgress = (progress, statusText, isError = false, isComplete = false, errorMsg = '') => {
+        activeDownloadSession = {
+          tabId,
+          url,
+          title,
+          progress,
+          statusText,
+          isError,
+          isComplete,
+          errorMsg
+        };
         chrome.runtime.sendMessage({
           action: 'hlsDownloadProgress',
           progress,

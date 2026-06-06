@@ -196,7 +196,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const blobUrl = URL.createObjectURL(blob);
       
       const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
-      const filename = `[ReadyStream]_${safeTitle}.${extension}`;
+      const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+      const filename = `${prefix}_${safeTitle}.${extension}`;
 
       const downloadAnchor = document.createElement('a');
       downloadAnchor.href = blobUrl;

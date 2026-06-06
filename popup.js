@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // 닫기 버튼 이벤트 바인딩
   closeBtn.addEventListener('click', () => {
     overlay.classList.add('hidden');
+    chrome.runtime.sendMessage({ action: 'clearActiveDownload' });
   });
 
   // HLS 다운로드 실시간 진행 상태 리스너 추가
@@ -69,6 +70,31 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // 2. 초기 리스트 로딩 실행
     refreshMediaList();
+
+    // 2.5 백그라운드 활성 다운로드 세션 복원
+    chrome.runtime.sendMessage({ action: 'getActiveDownload' }, (response) => {
+      if (response && response.activeSession && response.activeSession.tabId === activeTab.id) {
+        const { progress, statusText, isError, isComplete, errorMsg } = response.activeSession;
+        overlay.classList.remove('hidden');
+        const progressCard = document.querySelector('.progress-card');
+        
+        if (isError) {
+          progressCard.classList.add('error');
+          status.innerHTML = `<span style="font-weight: 700; color: #FF4444;">❌ 다운로드 에러:</span><br>${errorMsg || '알 수 없는 네트워크 오류가 발생했습니다.'}`;
+          closeBtn.classList.remove('hidden');
+        } else {
+          progressCard.classList.remove('error');
+          fill.style.width = `${progress}%`;
+          percent.textContent = `${progress}%`;
+          status.textContent = statusText || '수집 작업 진행 중...';
+          if (isComplete) {
+            closeBtn.classList.remove('hidden');
+          } else {
+            closeBtn.classList.add('hidden');
+          }
+        }
+      }
+    });
 
     // 3. 백그라운드로부터 실시간 갱신 신호가 오면, 열려있는 팝업 화면 자동 갱신 (사용자가 수동으로 새로고침할 필요 전혀 없음!)
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -278,11 +304,23 @@ document.addEventListener('DOMContentLoaded', async () => {
                   }, { frameId: 0 }, (fallbackRes) => {
                     if (chrome.runtime.lastError) {
                       console.error("메인 프레임 전송 실패:", chrome.runtime.lastError);
-                      // 최후의 수단으로 팝업에서 직접 실행
+                      // 최후의 수단으로 백그라운드 다운로더 실행
                       if (secureTargetUrl.toLowerCase().includes('.mp4')) {
                         downloadMp4FromPopup(secureTargetUrl, title);
                       } else {
-                        downloadHlsStream(secureTargetUrl, title);
+                        overlay.classList.remove('hidden');
+                        progressCard.classList.remove('error');
+                        closeBtn.classList.add('hidden');
+                        fill.style.width = '0%';
+                        percent.textContent = '0%';
+                        status.textContent = '백그라운드 스트림 다운로더 가동 시작...';
+
+                        chrome.runtime.sendMessage({
+                          action: 'startHlsBackgroundFetch',
+                          url: secureTargetUrl,
+                          title: title,
+                          tabId: activeTab.id
+                        });
                       }
                     }
                   });
@@ -290,7 +328,20 @@ document.addEventListener('DOMContentLoaded', async () => {
               });
             });
           } else {
-            downloadHlsStream(url, title);
+            // 일반 웹사이트 HLS 다운로드: 백그라운드 위임!
+            overlay.classList.remove('hidden');
+            progressCard.classList.remove('error');
+            closeBtn.classList.add('hidden');
+            fill.style.width = '0%';
+            percent.textContent = '0%';
+            status.textContent = '백그라운드 스트림 다운로더 가동 시작...';
+
+            chrome.runtime.sendMessage({
+              action: 'startHlsBackgroundFetch',
+              url: url,
+              title: title,
+              tabId: activeTab.id
+            });
           }
         } else {
           // 일반 MP4 등 원본 다운로드 실행
