@@ -415,8 +415,13 @@ async function downloadHlsStreamFromContent(m3u8Url, title) {
     sendProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
 
   } catch (err) {
-    console.error("다운로드 중 에러 발생:", err);
-    sendProgress(0, '다운로드 실패', true, false, err.stack || err.message || err.toString());
+    console.warn("HLS 동일 출처 다운로드 실패, 백그라운드 우회 다운로드로 전환합니다...", err);
+    sendProgress(5, '보안 정책(CSP/CORS) 감지됨. 백그라운드 우회 다운로더 가동 중...');
+    chrome.runtime.sendMessage({
+      action: 'startHlsBackgroundFetch',
+      url: m3u8Url,
+      title: title
+    });
   }
 }
 
@@ -487,7 +492,13 @@ async function downloadMp4FromContent(mp4Url, title) {
     sendProgress(100, '다운로드 완료 및 MP4 소장 완료!', false, true);
 
   } catch (err) {
-    console.error("MP4 스트림 다운로드 오류:", err);
-    sendProgress(0, '다운로드 실패', true, false, err.stack || err.message || err.toString());
+    console.warn("MP4 동일 출처 다운로드 실패, 백그라운드 우회 다운로드로 전환합니다...", err);
+    sendProgress(5, '보안 정책(CSP/CORS) 감지됨. 백그라운드 우회 다운로더 가동 중...');
+    chrome.runtime.sendMessage({
+      action: 'startBackgroundFetch',
+      url: mp4Url,
+      referer: window.location.href,
+      title: title
+    });
   }
 }
