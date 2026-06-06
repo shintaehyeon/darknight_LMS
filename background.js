@@ -269,7 +269,7 @@ async function downloadHlsInBackground(m3u8Url, title, tabId) {
     updateProgress(5, 'M3U8 마스터 플레이리스트 파일 수집 중...');
 
     // 1. M3U8 메인 주소 파싱
-    const response = await fetch(m3u8Url);
+    const response = await fetch(m3u8Url, { credentials: 'include' });
     if (!response.ok) throw new Error(`M3U8 플레이리스트 요청 실패 (상태 코드: ${response.status})`);
     const text = await response.text();
 
@@ -329,7 +329,7 @@ async function downloadHlsInBackground(m3u8Url, title, tabId) {
       const batch = tsUrls.slice(i, i + concurrencyLimit);
       const promises = batch.map((url, index) => {
         const currentIndex = i + index;
-        return fetch(url)
+        return fetch(url, { credentials: 'include' })
           .then(res => {
             if (!res.ok) throw new Error(`비디오 파편 다운로드 오류 (${res.status})`);
             return res.arrayBuffer();
@@ -573,7 +573,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log("백그라운드 우회 DNR 규칙 주입 완료 (레퍼러 연동:", refererHeaderValue + ")");
         sendProgress(10, '데이터 채널 보안 우회 수집 연결 시도 중...');
 
-        const res = await fetch(secureUrl);
+        const res = await fetch(secureUrl, { credentials: 'include' });
         if (!res.ok) throw new Error(`비디오 서버 백그라운드 연결 실패 (상태 코드: ${res.status})`);
 
         const reader = res.body.getReader();
