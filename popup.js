@@ -345,53 +345,26 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         } else {
           // 일반 MP4 등 원본 다운로드 실행
-          if (url.includes('hducc.handong.edu')) {
-            chrome.runtime.sendMessage({ action: 'getMediaList', tabId: activeTab.id }, (response) => {
-              const list = response ? response.mediaList : [];
-              
-              let targetFrameId = frameId;
-              if (targetFrameId === null || targetFrameId === undefined || targetFrameId === 0) {
-                const matchingItem = list.find(item => 
-                  item.frameId !== null && 
-                  item.frameId !== undefined && 
-                  item.frameId !== 0 && 
-                  (item.url.includes('hducc.handong.edu') || item.type.toLowerCase().includes('readystream'))
-                );
-                if (matchingItem) {
-                  targetFrameId = matchingItem.frameId;
-                }
-              }
+          if (url.includes('hducc.handong.edu') || url.includes('lms.handong.edu')) {
+            // 백그라운드 우회 다운로더 가동!
+            overlay.classList.remove('hidden');
+            progressCard.classList.remove('error');
+            closeBtn.classList.add('hidden');
+            fill.style.width = '0%';
+            percent.textContent = '0%';
+            status.textContent = '백그라운드 보안 우회 다운로더 가동 중...';
 
-              // UI 모달 표출
-              overlay.classList.remove('hidden');
-              progressCard.classList.remove('error');
-              closeBtn.classList.add('hidden');
-              fill.style.width = '0%';
-              percent.textContent = '0%';
-              status.textContent = '다운로드 요청을 플레이어 프레임에 전달 중...';
+            let secureUrl = url;
+            if (secureUrl.startsWith('http://')) {
+              secureUrl = secureUrl.replace('http://', 'https://');
+            }
 
-              let secureUrl = url;
-              if (secureUrl.startsWith('http://')) {
-                secureUrl = secureUrl.replace('http://', 'https://');
-              }
-
-              chrome.tabs.sendMessage(activeTab.id, {
-                action: 'startHlsDownload',
-                url: secureUrl,
-                title: title
-              }, { frameId: targetFrameId }, (res) => {
-                if (chrome.runtime.lastError) {
-                  chrome.tabs.sendMessage(activeTab.id, {
-                    action: 'startHlsDownload',
-                    url: secureUrl,
-                    title: title
-                  }, { frameId: 0 }, (fallbackRes) => {
-                    if (chrome.runtime.lastError) {
-                      downloadMp4FromPopup(secureUrl, title);
-                    }
-                  });
-                }
-              });
+            chrome.runtime.sendMessage({
+              action: 'startBackgroundFetch',
+              url: secureUrl,
+              referer: activeTab.url,
+              title: title,
+              tabId: activeTab.id
             });
           } else {
             chrome.downloads.download({

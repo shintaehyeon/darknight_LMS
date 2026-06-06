@@ -546,7 +546,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             type: "modifyHeaders",
             requestHeaders: [
               { header: "Referer", operation: "set", value: refererHeaderValue },
-              { header: "Origin", operation: "set", value: "https://hducc.handong.edu" },
+              { header: "Origin", operation: "set", value: urlObj.origin },
               { header: "Cookie", operation: "set", value: cookieStr }
             ],
             responseHeaders: [
