@@ -91,9 +91,8 @@ This report analyzes the multi-layered security infrastructure (CORS, CSP, SameS
   3. 크롬 브라우저의 네이티브 다운로드 API(`chrome.downloads.download`)는 서버가 `403 Forbidden` 등의 에러 상태를 반환하더라도 해당 에러 응답 바디(`Access Denied\r\n` - 15바이트)를 파일로 그대로 저장하고 다운로드를 "성공/완료" 처리하는 특성을 가지고 있었기 때문입니다.
   4. 추가로 기존 파일명 포맷팅 중 타이틀에 `.mp4`가 포함되어 있을 경우 저장 파일명이 `[DarkKnight]_main_(...).mp4.mp4`와 같이 중복 확장자로 표기되는 버그가 함께 존재했습니다.
 * **[KR] 해결 매커니즘**:
-  - **DNR 규칙 1003 영구 추가**: 네이버 CDN(`naverncp.com`) 도메인을 필터링하는 전용 규칙(ID: 1003)을 `background.js` 초기화 시 등록하도록 하여, 브라우저가 보내는 모든 네이버 CDN 관련 요청(다운로드 요청 포함)에 `Referer: https://hducc.handong.edu/`와 `Origin`을 강제로 자동 주입하도록 구현하였습니다.
-  - **크롬 네이티브 다운로더 전환**: 메모리에 수백 MB의 동영상 데이터를 올려 전송하는 무겁고 불안정한 `startBackgroundFetch` 대신, 크롬의 네이티브 다운로드 API(`chrome.downloads.download`)로 MP4 요청을 단일화하였습니다.
-  - **샌드박스 우회 우아한 우회 경로**: `content.js`가 iframe 내에서 동영상 실주소를 역추적(DOM 분석)한 후, 만약 MP4 주소일 경우 무겁게 fetch하지 않고 즉시 백그라운드 메시지(`triggerDirectDownload`)를 발송하여 네이티브 다운로드를 실행하도록 변경하였습니다. 이로써 Iframe Sandbox 및 CSP 차단 정책에 영향을 받지 않고 즉시 로컬 디스크로 파일 저장이 트리거됩니다.
+  - **DNR 규칙 1003 영구 추가**: 네이버 CDN(`naverncp.com`) 도메인을 필터링하는 전용 규칙(ID: 1003)을 `background.js` 초기화 시 등록하도록 하여, 브라우저가 보내는 모든 네이버 CDN 관련 요청에 `Referer: https://hducc.handong.edu/`와 `Origin: https://hducc.handong.edu`를 강제로 자동 주입하도록 구현하였습니다.
+  - **백그라운드 fetch 및 동일 출처 blob 다운로드 경로로 회귀**: 크롬 브라우저의 네이티브 다운로드 API(`chrome.downloads.download`)는 확장 프로그램이 등록한 declarativeNetRequest 규칙(DNR)을 완벽히 무시하거나, 쿠키 인증 세션을 온전히 전송하지 못해 여전히 15바이트의 `Access Denied` 오류를 유발하는 치명적인 사양이 확인되었습니다. 이를 해결하기 위해, 네이버 CDN 및 한동대 MP4 다운로드 경로를 다시 백그라운드 서비스 워커의 `startBackgroundFetch` 엔진으로 우회 및 일원화하였습니다. 백그라운드에서 fetch가 이루어질 때 dynamic DNR 규칙(Rule 2001)과 영구 DNR 규칙(Rule 1003)이 완벽하게 결합하여 레퍼러와 쿠키 인증 정보(쿠키가 존재할 경우에만 동적으로 2001에 주입하도록 Rule 2001 최적화 적용)를 패키징해 통과시킵니다. 수집 완료된 ArrayBuffer 바이너리는 메인 프레임(`frameId: 0`)으로 릴레이 전송되어 샌드박스 보안 규제를 우회하여 완전한 비디오 파일로 저장됩니다.
   - **중복 확장자 제거**: 정규식 `.replace(/\.(mp4|ts|m3u8)$/i, '')`를 활용하여 원본 파일명에 이미 확장자가 포함되어 있더라도 최종 저장 파일에 확장자가 중복되지 않도록 깔끔하게 정돈하였습니다.
 
 * **[EN] The Issue**: MP4 videos hosted on Naver Cloud CDN (`naverncp.com`) downloaded as tiny **15-byte** files that were completely unplayable. Inspected as plain text, they contained the string `Access Denied`.
@@ -103,9 +102,8 @@ This report analyzes the multi-layered security infrastructure (CORS, CSP, SameS
   3. Chrome's download manager writes the error response body (`Access Denied\r\n` - 15 bytes) directly to the destination path and flags the transaction as "successful."
   4. In addition, string concatenations led to duplicate extensions like `.mp4.mp4`.
 * **[EN] Resolution**:
-  - **Persistent DNR Rule 1003**: Appended a persistent dynamic rule (ID: 1003) for `naverncp.com` to inject `Referer: https://hducc.handong.edu/` on all outgoing matches.
-  - **Direct Chrome Download routing**: Bypassed unstable in-memory buffering by sending all direct MP4 downloads to `chrome.downloads.download`.
-  - **Sandbox Bypass Simplification**: The iframe content script detects the direct MP4 source and relays it to the background via `triggerDirectDownload`, avoiding iframe CSP checks and sandbox blockages.
+  - **Persistent DNR Rule 1003**: Appended a persistent dynamic rule (ID: 1003) for `naverncp.com` to inject `Referer: https://hducc.handong.edu/` and `Origin: https://hducc.handong.edu` on all outgoing matches.
+  - **Reverting to Background fetch & Same-Origin Blob Download routing**: Chrome's native `chrome.downloads.download` API completely bypasses declarativeNetRequest (DNR) header injection on certain environments and fails to carry cookie sessions properly, triggering the 15-byte Access Denied error. To bypass this native limitation, we routed Naver CDN and Handong MP4 requests back to `startBackgroundFetch` inside the background service worker. This service worker fetch triggers persistent Rule 1003 and dynamic Rule 2001 (which dynamically appends the active session cookies only when available), bypassing authorization blocks. Once fetched into memory as an ArrayBuffer, it is relayed to the top-level main frame (`frameId: 0`) content script to download as a playable MP4.
   - **Sanitized Filenames**: Used `.replace(/\.(mp4|ts|m3u8)$/i, '')` to eliminate double extension errors.
 
 ---
