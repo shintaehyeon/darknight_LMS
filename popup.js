@@ -281,63 +281,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
               console.log("최종 다운로드 위임 대상 frameId:", targetFrameId);
 
+              console.log("최종 다운로드 위임 대상 frameId: 0 (메인 프레임)");
+
               // UI 모달 표출
               overlay.classList.remove('hidden');
               progressCard.classList.remove('error');
               closeBtn.classList.add('hidden');
               fill.style.width = '0%';
               percent.textContent = '0%';
-              status.textContent = '다운로드 요청을 플레이어 프레임에 전달 중...';
+              status.textContent = '다운로드 요청을 메인 프레임에 전달 중...';
 
               chrome.tabs.sendMessage(activeTab.id, {
                 action: 'startHlsDownload',
                 url: secureTargetUrl,
                 title: title
-              }, { frameId: targetFrameId }, (res) => {
-                if (chrome.runtime.lastError) {
-                  console.warn("아이프레임 전송 실패, 메인 프레임으로 폴백 전송 시도:", chrome.runtime.lastError);
-                  // 메인 프레임으로 폴백 전송 (예: 플레이어 새 창으로 연 경우)
-                  chrome.tabs.sendMessage(activeTab.id, {
-                    action: 'startHlsDownload',
-                    url: secureTargetUrl,
-                    title: title
-                  }, { frameId: 0 }, (fallbackRes) => {
-                    if (chrome.runtime.lastError) {
-                      console.error("메인 프레임 전송 실패:", chrome.runtime.lastError);
-                      if (secureTargetUrl.toLowerCase().includes('.mp4')) {
-                        overlay.classList.remove('hidden');
-                        progressCard.classList.remove('error');
-                        closeBtn.classList.add('hidden');
-                        fill.style.width = '0%';
-                        percent.textContent = '0%';
-                        status.textContent = '백그라운드 스트림 다운로더 가동 시작...';
-
-                        chrome.runtime.sendMessage({
-                          action: 'startBackgroundFetch',
-                          url: secureTargetUrl,
-                          referer: activeTab.url,
-                          title: title,
-                          tabId: activeTab.id
-                        });
-                      } else {
-                        overlay.classList.remove('hidden');
-                        progressCard.classList.remove('error');
-                        closeBtn.classList.add('hidden');
-                        fill.style.width = '0%';
-                        percent.textContent = '0%';
-                        status.textContent = '백그라운드 스트림 다운로더 가동 시작...';
-
-                        chrome.runtime.sendMessage({
-                          action: 'startHlsBackgroundFetch',
-                          url: secureTargetUrl,
-                          title: title,
-                          tabId: activeTab.id
-                        });
-                      }
-                    }
-                  });
-                }
-              });
+              }, { frameId: 0 });
             });
           } else {
             // 일반 웹사이트 HLS 다운로드: 백그라운드 위임!
@@ -363,45 +321,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             closeBtn.classList.add('hidden');
             fill.style.width = '0%';
             percent.textContent = '0%';
-            status.textContent = '다운로드 요청을 플레이어 프레임에 전달 중...';
+            status.textContent = '다운로드 요청을 메인 프레임에 전달 중...';
 
             let secureUrl = url;
             if (secureUrl.startsWith('http://')) {
               secureUrl = secureUrl.replace('http://', 'https://');
             }
 
-            let targetFrameId = frameId;
-            chrome.runtime.sendMessage({ action: 'getMediaList', tabId: activeTab.id }, (response) => {
-              const list = response ? response.mediaList : [];
-              if (targetFrameId === null || targetFrameId === undefined || targetFrameId === 0) {
-                const matchingItem = list.find(item => 
-                  item.frameId !== null && 
-                  item.frameId !== undefined && 
-                  item.frameId !== 0 && 
-                  (item.url.includes('hducc.handong.edu') || item.type.toLowerCase().includes('readystream'))
-                );
-                if (matchingItem) {
-                  targetFrameId = matchingItem.frameId;
-                }
-              }
-
-              console.log("최종 MP4 다운로드 위임 대상 frameId:", targetFrameId);
-
-              chrome.tabs.sendMessage(activeTab.id, {
-                action: 'startMp4Download',
-                url: secureUrl,
-                title: title
-              }, { frameId: targetFrameId }, (res) => {
-                if (chrome.runtime.lastError) {
-                  console.warn("아이프레임 전송 실패, 메인 프레임으로 폴백 전송 시도:", chrome.runtime.lastError);
-                  chrome.tabs.sendMessage(activeTab.id, {
-                    action: 'startMp4Download',
-                    url: secureUrl,
-                    title: title
-                  }, { frameId: 0 });
-                }
-              });
-            });
+            chrome.tabs.sendMessage(activeTab.id, {
+              action: 'startMp4Download',
+              url: secureUrl,
+              title: title
+            }, { frameId: 0 });
           } else {
             const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
             const cleanTitle = safeTitle.replace(/\.mp4$/i, '');

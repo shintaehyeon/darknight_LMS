@@ -423,23 +423,30 @@ async function downloadHlsStreamFromContent(m3u8Url, title) {
     // 6. 브라우저 최종 파일 다운로드 트리거 (.ts 포맷 무손실 원본 저장)
     sendProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
     
-    chrome.runtime.sendMessage({
-      action: 'triggerBlobDownload',
-      arrayBuffer: mergedArray.buffer,
-      title: title,
-      extension: 'ts'
-    });
+    const blob = new Blob([mergedArray], { type: 'video/mp2t' });
+    const blobUrl = URL.createObjectURL(blob);
+    
+    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
+    const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+    const filename = `${prefix}_${cleanTitle}.ts`;
+
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.href = blobUrl;
+    downloadAnchor.download = filename;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+
+    setTimeout(() => {
+      document.body.removeChild(downloadAnchor);
+      URL.revokeObjectURL(blobUrl);
+    }, 10000);
     
     sendProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
 
   } catch (err) {
-    console.warn("HLS 동일 출처 다운로드 실패, 백그라운드 우회 다운로드로 전환합니다...", err);
-    sendProgress(5, '보안 정책(CSP/CORS) 감지됨. 백그라운드 우회 다운로더 가동 중...');
-    chrome.runtime.sendMessage({
-      action: 'startHlsBackgroundFetch',
-      url: m3u8Url,
-      title: title
-    });
+    console.error("HLS 동일 출처 다운로드 실패:", err);
+    sendProgress(0, '다운로드 실패', true, false, err.message || err.toString());
   }
 }
 
@@ -507,23 +514,29 @@ async function downloadMp4FromContent(mp4Url, title) {
       offset += chunk.length;
     }
 
-    chrome.runtime.sendMessage({
-      action: 'triggerBlobDownload',
-      arrayBuffer: mergedArray.buffer,
-      title: title,
-      extension: 'mp4'
-    });
+    const blob = new Blob([mergedArray], { type: 'video/mp4' });
+    const blobUrl = URL.createObjectURL(blob);
+    
+    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
+    const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+    const filename = `${prefix}_${cleanTitle}.mp4`;
+
+    const downloadAnchor = document.createElement('a');
+    downloadAnchor.href = blobUrl;
+    downloadAnchor.download = filename;
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+
+    setTimeout(() => {
+      document.body.removeChild(downloadAnchor);
+      URL.revokeObjectURL(blobUrl);
+    }, 10000);
 
     sendProgress(100, '다운로드 완료 및 MP4 소장 완료!', false, true);
 
   } catch (err) {
-    console.warn("MP4 동일 출처 다운로드 실패, 백그라운드 우회 다운로드로 전환합니다...", err);
-    sendProgress(5, '보안 정책(CSP/CORS) 감지됨. 백그라운드 우회 다운로더 가동 중...');
-    chrome.runtime.sendMessage({
-      action: 'startBackgroundFetch',
-      url: mp4Url,
-      referer: window.location.href,
-      title: title
-    });
+    console.error("MP4 동일 출처 다운로드 실패:", err);
+    sendProgress(0, '다운로드 실패', true, false, err.message || err.toString());
   }
 }
