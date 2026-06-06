@@ -47,7 +47,59 @@ function scanDOMForVideos() {
     });
   });
 
-  // 2. <iframe> 요소 정밀 검사
+  // 2. <script> 태그 내부 전역 스캔 (ReadyStream 슬라이드 분할 강의 자동 탐지)
+  //    ReadyStream 플레이어는 슬라이드(PPT) 전환에 맞춰 여러 개의 개별 MP4/M3U8 파일을
+  //    순차 교체하며 재생합니다. 페이지의 script 태그에 이 모든 파일 주소가 포함되어 있으므로
+  //    전역 정규식으로 한 번에 수집합니다.
+  const scriptElements = document.querySelectorAll('script');
+  const scriptMediaUrls = [];
+  const scriptMediaRegex = /(https?:\/\/[^"'\s]+\.(?:mp4|m3u8)[^"'\s]*)/gi;
+
+  scriptElements.forEach((scriptEl) => {
+    const content = scriptEl.textContent;
+    if (!content) return;
+
+    let match;
+    while ((match = scriptMediaRegex.exec(content)) !== null) {
+      const detectedUrl = match[1];
+      // preloader, loader, 로고, 광고 관련 URL 필터링
+      if (/preloader|loader|logo|advert|analytics/i.test(detectedUrl)) continue;
+      // 이미 video/source 태그로 수집한 URL이면 건너뜀
+      if (uniqueUrls.has(detectedUrl)) continue;
+
+      scriptMediaUrls.push(detectedUrl);
+    }
+  });
+
+  // 스크립트 내에서 발견된 슬라이드 파트별 비디오를 등록
+  if (scriptMediaUrls.length > 0) {
+    const pageTitle = document.title.replace(/\s*:\s*알고리즘.*$/i, '').trim() || 'ReadyStream 강의';
+    scriptMediaUrls.forEach((mediaUrl, index) => {
+      if (uniqueUrls.has(mediaUrl)) return;
+      uniqueUrls.add(mediaUrl);
+
+      // 원본 파일명 추출 (예: main_(662e3858-...).mp4)
+      let originalFilename = '';
+      try {
+        const urlObj = new URL(mediaUrl);
+        originalFilename = urlObj.pathname.substring(urlObj.pathname.lastIndexOf('/') + 1);
+      } catch (e) { /* 무시 */ }
+
+      const partNumber = index + 1;
+      const isReadyStreamCdn = mediaUrl.includes('hducc.handong.edu') || mediaUrl.includes('naverncp.com') || mediaUrl.includes('handong');
+      const typeLabel = mediaUrl.toLowerCase().includes('.m3u8') ? 'HLS 스트리밍 (M3U8)' : 'MP4 비디오 파일';
+
+      detectedItems.push({
+        url: mediaUrl,
+        type: isReadyStreamCdn ? 'ReadyStream 강의 비디오' : typeLabel,
+        title: isReadyStreamCdn
+          ? `[ReadyStream] ${pageTitle} (파트 ${partNumber} - ${originalFilename})`
+          : `${pageTitle} (파트 ${partNumber} - ${originalFilename})`
+      });
+    });
+  }
+
+  // 3. <iframe> 요소 정밀 검사
   const iframes = document.querySelectorAll('iframe');
   iframes.forEach((iframe) => {
     const src = iframe.src || iframe.getAttribute('data-src');
@@ -97,7 +149,7 @@ function scanDOMForVideos() {
     }
   });
 
-  // 3. 백그라운드 서비스 워커로 전송
+  // 4. 백그라운드 서비스 워커로 전송
   if (detectedItems.length > 0) {
     chrome.runtime.sendMessage({
       action: 'addDomMedia',
@@ -205,7 +257,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const blob = new Blob([arrayBuffer], { type: extension === 'mp4' ? 'video/mp4' : 'video/mp2t' });
       const blobUrl = URL.createObjectURL(blob);
       
-      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+      const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+      const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
       const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
       const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
       const filename = `${prefix}_${cleanTitle}.${extension}`;
@@ -426,7 +479,8 @@ async function downloadHlsStreamFromContent(m3u8Url, title) {
     const blob = new Blob([mergedArray], { type: 'video/mp2t' });
     const blobUrl = URL.createObjectURL(blob);
     
-    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+    const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
     const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
     const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
     const filename = `${prefix}_${cleanTitle}.ts`;
@@ -517,7 +571,8 @@ async function downloadMp4FromContent(mp4Url, title) {
     const blob = new Blob([mergedArray], { type: 'video/mp4' });
     const blobUrl = URL.createObjectURL(blob);
     
-    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+    const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
     const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
     const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
     const filename = `${prefix}_${cleanTitle}.mp4`;

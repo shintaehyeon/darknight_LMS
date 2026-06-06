@@ -112,10 +112,21 @@ This report analyzes the multi-layered security infrastructure (CORS, CSP, SameS
 
 ### 1.7 강의 재생 시간(10분 3초)과 다운로드 영상 시간(3분 44초)이 다른 이유 (Why the duration differs)
 * **[KR] 현상 분석**: LMS 페이지에는 `재생 시간 10분 3초`로 표시되는데 다운로드한 MP4 파일의 재생 시간은 `3분 44초`로 나오는 현상이 있습니다.
-  1. **실제 비디오 파일 확인**: 제공해주신 F12 개발자 도구의 Network 탭 및 실제 화면의 플레이어 재생 바를 확인해 보면, 브라우저가 비디오 서버로부터 로드한 실제 영상 파일(`main_(662e3858-...).mp4`)의 고유 재생 시간 역시 정확하게 **`3분 44초`**입니다.
-  2. **학습 인정 시간 설정**: 대학교 LMS 시스템 상에서 교수가 설정해 둔 '출석 인정을 위한 최소 학습 필요 시간(또는 권장 학습 시간)'이 10분 3초로 등록되어 있으나, 실제 업로드된 영상 파일 자체는 3분 44초 분량인 경우입니다.
-  3. **결론**: 다운로더가 영상을 중간에 자르고 일부분만 다운로드한 것이 아니라, **서버에 호스팅된 실제 영상 파일 전체를 100% 완벽하게 소장**한 것입니다.
-* **[EN] Duration Discrepancy**: The LMS page shows a required study time of `10m 3s`, but the seek bar of the player and the fetched file `main_(...).mp4` are natively `3m 44s`. The university LMS sets a required attendance duration longer than the actual video file. The extension has successfully downloaded 100% of the authentic video asset.
+  1. **ReadyStream 슬라이드 분할 재생 구조**: ReadyStream(자이닉스) 플레이어는 PPT 슬라이드 기반의 강의를 녹화할 때, **슬라이드 전환마다 별도의 독립된 MP4/M3U8 파일로 분할 저장**합니다. 예를 들어 10분 3초짜리 강의가 슬라이드 2장으로 구성되어 있다면, 서버에는 `파트 1 (3분 44초) + 파트 2 (6분 20초)` 두 개의 개별 영상 파일이 존재합니다.
+  2. **플레이어 내부 교체 재생**: ReadyStream 웹 플레이어는 현재 슬라이드에 해당하는 MP4 파일만 `<video>` 태그에 로딩하고, 사용자가 다음 슬라이드로 넘어가면 `src`를 새로운 MP4 파일로 동적 교체합니다. 따라서 LMS에서 표시하는 '10분 3초'는 모든 파트의 합산 총 재생 시간이며, 개별 파일 자체의 길이는 슬라이드마다 다릅니다.
+  3. **결론**: 다운로더가 영상을 중간에 자르고 일부분만 다운로드한 것이 아니라, **해당 슬라이드의 MP4 파일 전체를 100% 완벽하게 소장**한 것입니다. 나머지 시간의 영상은 다른 슬라이드(파트 2, 파트 3...)에 담겨 있습니다.
+* **[EN] Duration Discrepancy**: The LMS page shows a total study time of `10m 3s`, but the downloaded file is natively `3m 44s`. ReadyStream splits slide-based lectures into **multiple independent MP4 files (one per slide)**. The player swaps the `<video src>` dynamically as the user navigates slides. Part 1 is 3m 44s, Part 2 is 6m 20s — together they sum to the total lecture duration. The extension successfully downloads each part in its entirety.
+
+### 1.8 슬라이드 분할 강의 전체 파트 자동 탐지 기술 (Auto-Detecting All Slide Video Parts)
+* **[KR] 기술 해설**: 기존 v1 크롤러는 현재 `<video>` 태그에 로딩된(재생 중인) 한 개의 MP4 파일만 감지하므로, 아직 슬라이드가 넘어가지 않은 파트의 영상은 탐지 목록에서 누락되었습니다.
+  - **해결 방안 (`<script>` 태그 전역 정규식 스캔)**: ReadyStream 플레이어의 HTML 소스 내에 삽입된 `<script>` 태그에는 모든 슬라이드에 대응되는 비디오 파일 주소(예: `https://handong-cms.edge.naverncp.com/.../main_(uuid).mp4`)가 JavaScript 변수 또는 JSON 배열 형태로 사전에 정의되어 있습니다. `content.js`의 `scanDOMForVideos()` 함수가 페이지 로딩 직후 모든 `<script>` 태그의 텍스트 콘텐츠를 전역 정규식 `/(https?:\/\/[^\"\s]+\.(?:mp4|m3u8)[^\"\s]*)/gi`로 순회 탐색하여, 아직 재생되지 않은 파트의 영상 주소까지 **한 번에 전부 추출**합니다.
+  - **파트 번호 자동 부여**: 발견된 순서대로 `파트 1`, `파트 2` 등의 일련번호를 타이틀에 부여하고, 원본 파일명(예: `main_(662e3858-...).mp4`)을 함께 표기하여 사용자가 팝업 목록에서 각 파트를 명확히 구분할 수 있도록 합니다.
+  - **중복 접두사 완벽 제거**: 파일 저장 시 타이틀에 이미 `[ReadyStream]` 접두사가 포함되어 있을 경우 이를 먼저 제거(`title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '')`)한 후 새로 부여하여, `[ReadyStream]_[ReadyStream]_강의명.mp4` 같은 중복 접두사 오류를 원천 차단합니다.
+
+* **[EN] Technical Solution**: The v1 crawler only detected the currently active `<video src>`, missing slides that hadn't been navigated to yet.
+  - **`<script>` Tag Global Regex Scanning**: ReadyStream's player HTML contains `<script>` tags where all slide video URLs are pre-declared as JavaScript variables or JSON arrays. The enhanced `scanDOMForVideos()` in `content.js` globally scans every `<script>` tag's text content using the regex `/(https?:\/\/[^\"\s]+\.(?:mp4|m3u8)[^\"\s]*)/gi`, extracting **all slide video parts in a single pass** — even those not yet playing.
+  - **Automatic Part Numbering**: Detected URLs are labeled `Part 1`, `Part 2`, etc., with the original filename appended for clarity.
+  - **Duplicate Prefix Prevention**: All filename generation routines strip any existing `[ReadyStream]` or `[DarkKnight]` prefix from the title before re-applying it, eliminating `[ReadyStream]_[ReadyStream]_...` errors.
 
 ---
 

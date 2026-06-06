@@ -548,10 +548,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   else if (message.action === 'triggerDirectDownload') {
     const { url, title } = message;
-    const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+    const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+    const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
     const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
     const extension = url.toLowerCase().includes('.mp4') ? 'mp4' : 'ts';
-    const filename = `[ReadyStream]_${cleanTitle}.${extension}`;
+    const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+    const filename = `${prefix}_${cleanTitle}.${extension}`;
 
     chrome.downloads.download({
       url: url,

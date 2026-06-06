@@ -334,7 +334,8 @@ document.addEventListener('DOMContentLoaded', async () => {
               title: title
             }, { frameId: 0 });
           } else {
-            const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+            const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+            const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
             const cleanTitle = safeTitle.replace(/\.mp4$/i, '');
             const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
             const filename = `${prefix}_${cleanTitle}.mp4`;
@@ -533,7 +534,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const videoBlob = new Blob([mergedArray], { type: 'video/mp2t' });
       const blobUrl = URL.createObjectURL(videoBlob);
       
-      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+      const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+      const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
       const filename = `[ReadyStream]_${safeTitle}.ts`;
 
       const downloadAnchor = document.createElement('a');
@@ -607,7 +609,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       const videoBlob = new Blob(chunks, { type: 'video/mp4' });
       const blobUrl = URL.createObjectURL(videoBlob);
       
-      const safeTitle = title.replace(/[\\/:*?"<>|]/g, '_');
+      const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+      const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
       const filename = `[ReadyStream]_${safeTitle}.mp4`;
 
       const downloadAnchor = document.createElement('a');
