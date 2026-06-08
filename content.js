@@ -107,9 +107,14 @@ function scanDOMForVideos() {
       const isReadyStream = src.includes('hducc.handong.edu/em/') || src.includes('hducc.handong.edu/index.php/vod/view_page/');
       const isYoutube = src.includes('youtube.com') || src.includes('youtu.be');
       const isVimeo = src.includes('vimeo.com');
+      const isTikTok = src.includes('tiktok.com');
+      const isInstagram = src.includes('instagram.com');
+      const isFacebook = src.includes('facebook.com') || src.includes('fb.watch');
+      const isBluesky = src.includes('bsky.app');
+      const isAv19 = src.includes('nnvivi.site') || src.includes('av19.fit') || src.includes('vdnext.com');
 
       // 진짜 비디오 임베드인 경우만 필터링 통과
-      if (isReadyStream || isYoutube || isVimeo || isValidMediaUrl(src)) {
+      if (isReadyStream || isYoutube || isVimeo || isTikTok || isInstagram || isFacebook || isBluesky || isAv19 || isValidMediaUrl(src)) {
         
         // [필터링 꿀팁] LMS 자체 껍데기 iframe (예: external_tools)은 사용자 혼란 방지를 위해 완전히 무시 처리!
         if (src.includes('lms.handong.edu') && src.includes('external_tools')) {
@@ -122,11 +127,21 @@ function scanDOMForVideos() {
         if (isReadyStream) {
           typeLabel = 'ReadyStream 강의 비디오';
         } else if (isYoutube) {
-          typeLabel = 'YouTube 비디오';
+          typeLabel = '▶️ YouTube 비디오';
         } else if (isVimeo) {
-          typeLabel = 'Vimeo 비디오';
+          typeLabel = '🎬 Vimeo 비디오';
         } else if (isXVideo) {
-          typeLabel = 'X (트위터) 비디오';
+          typeLabel = '🐦 X (트위터) 비디오';
+        } else if (isTikTok) {
+          typeLabel = '🎵 틱톡 비디오';
+        } else if (isInstagram) {
+          typeLabel = '📸 인스타그램 비디오';
+        } else if (isFacebook) {
+          typeLabel = '📘 페이스북 비디오';
+        } else if (isBluesky) {
+          typeLabel = '🦋 블루스카이 비디오';
+        } else if (isAv19) {
+          typeLabel = '🔞 AV19 암호화 비디오 (복호화 가능)';
         }
 
         const absoluteUrl = makeAbsoluteUrl(src);
@@ -193,7 +208,7 @@ function getMediaTypeFromUrl(url, defaultType) {
 // 1. 페이지 로딩 완료 시점에 자동 1차 스캔 실행
 scanDOMForVideos();
 
-// 2. SPA 환경 대응 MutationObserver
+// 2. SPA 환경 대응 MutationObserver (노드 추가 및 src 속성 변경 실시간 감시)
 let mutationTimeout;
 const observer = new MutationObserver(() => {
   clearTimeout(mutationTimeout);
@@ -204,7 +219,9 @@ const observer = new MutationObserver(() => {
 
 observer.observe(document.body, {
   childList: true,
-  subtree: true
+  subtree: true,
+  attributes: true,
+  attributeFilter: ['src']
 });
 
 // 3. 백그라운드로부터 리셋 및 다운로드 위임 명령을 수신
@@ -279,8 +296,92 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       console.error("다운로드 실행 실패:", e);
       sendResponse({ success: false, error: e.message });
     }
+  } else if (message.action === 'startAv19Download') {
+    // 인젝션 스크립트에 파편 추출 명령 하달
+    window.postMessage({ action: 'extractAv19Hls', title: message.title }, '*');
+    sendResponse({ success: true, message: 'AV19 복호화 인젝션 스크립트 호출됨' });
   }
   return true;
+});
+
+// --- AV19 메인 월드 스크립트 인젝션 (AES-128 키 및 조각 탈취용) ---
+const script = document.createElement('script');
+script.textContent = `
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.action === 'extractAv19Hls') {
+      try {
+        const video = document.querySelector('video');
+        if (!video || !video._l5 || !video._l5.hls) {
+          window.postMessage({ action: 'av19HlsExtracted', success: false, error: 'HLS 인스턴스를 찾을 수 없습니다. 영상이 재생 중인지 확인해주세요.' }, '*');
+          return;
+        }
+        
+        const hls = video._l5.hls;
+        if (!hls.levels || hls.levels.length === 0) {
+          window.postMessage({ action: 'av19HlsExtracted', success: false, error: 'HLS 레벨 정보가 아직 로드되지 않았습니다.' }, '*');
+          return;
+        }
+        
+        const level = hls.levels[hls.currentLevel === -1 ? 0 : hls.currentLevel];
+        if (!level || !level.details || !level.details.fragments) {
+          window.postMessage({ action: 'av19HlsExtracted', success: false, error: 'HLS 파편 정보가 없습니다.' }, '*');
+          return;
+        }
+        
+        const fragments = level.details.fragments.map(frag => {
+          let keyArray = null;
+          let ivArray = null;
+          if (frag.decryptdata && frag.decryptdata.key) {
+            keyArray = Array.from(new Uint8Array(frag.decryptdata.key));
+            if (frag.decryptdata.iv) {
+              ivArray = Array.from(new Uint8Array(frag.decryptdata.iv));
+            } else {
+              // IV가 없는 경우 HLS 스펙에 따라 Sequence Number (sn)로 IV 생성
+              let iv = new Uint8Array(16);
+              let sn = frag.sn;
+              if (typeof sn !== 'number') sn = parseInt(sn, 10) || 0;
+              for (let i = 15; i >= 12; i--) {
+                iv[i] = sn & 0xff;
+                sn >>= 8;
+              }
+              ivArray = Array.from(iv);
+            }
+          }
+          return {
+            url: frag.url,
+            key: keyArray,
+            iv: ivArray
+          };
+        });
+        
+        window.postMessage({ action: 'av19HlsExtracted', success: true, fragments: fragments, title: event.data.title }, '*');
+      } catch (e) {
+        window.postMessage({ action: 'av19HlsExtracted', success: false, error: e.message }, '*');
+      }
+    }
+  });
+`;
+document.documentElement.appendChild(script);
+script.remove();
+
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.action === 'av19HlsExtracted') {
+    if (event.data.success) {
+      chrome.runtime.sendMessage({
+        action: 'startEncryptedHlsDownload',
+        fragments: event.data.fragments,
+        title: event.data.title || 'AV19 암호화 비디오'
+      });
+    } else {
+      chrome.runtime.sendMessage({
+        action: 'hlsDownloadProgress',
+        progress: 0,
+        statusText: '다운로드 실패',
+        isError: true,
+        errorMsg: event.data.error
+      }).catch(() => {});
+    }
+  }
 });
 
 /**
@@ -426,172 +527,107 @@ async function downloadHlsStreamFromContent(m3u8Url, title) {
         sendProgress(12, '고화질 서브 스트리밍 리스트 감지, 주소 전환 중...');
         return downloadHlsStreamFromContent(subPlaylists[0], title);
       }
-
       throw new Error('M3U8 스트리밍 내에서 분할 비디오 조각(TS)을 찾지 못했습니다.');
     }
 
-    // 4. TS 파일 다운로드 가동 (5개 채널 동시 고속 다운로드)
-    const total = tsUrls.length;
-    const tsChunks = new Array(total);
-    sendProgress(15, `비디오 조각 다운로드 대기 중... (총 ${total}개 파편)`);
-
-    const concurrencyLimit = 5;
-    for (let i = 0; i < tsUrls.length; i += concurrencyLimit) {
-      const batch = tsUrls.slice(i, i + concurrencyLimit);
-      const promises = batch.map((url, index) => {
-        const currentIndex = i + index;
-        return fetch(url, { credentials: 'include' })
-          .then(res => {
-            if (!res.ok) throw new Error(`비디오 파편 다운로드 오류 (${res.status})`);
-            return res.arrayBuffer();
-          })
-          .then(buffer => {
-            tsChunks[currentIndex] = new Uint8Array(buffer);
-            
-            // 다운로드 퍼센트 실시간 UI 반영
-            const completed = tsChunks.filter(Boolean).length;
-            const progressPct = Math.round((completed / total) * 83) + 15; // 15% ~ 98% 진행
-            
-            sendProgress(progressPct, `비디오 파편 수집 중: ${completed} / ${total} 개 완료`);
-          });
-      });
-
-      await Promise.all(promises);
-    }
-
-    // 5. 바이너리 스트림 고속 병합
-    sendProgress(98, '수집된 비디오 파편 고속 병합 중... 잠시만 기다려주세요.');
+    // 1시간 이상 대용량 파일의 안정성(OOM 방지)과 외부 CDN(네이버 클라우드 등)의 CSP/CORS 완전 우회를 위해 
+    // 모든 실제 다운로드 처리를 백그라운드로 위임! 백그라운드는 다운로드한 데이터를 스트리밍으로 content.js에 넘겨 디스크 캐싱을 유도함.
+    // [v3.0] TS URL 목록을 직접 전달하여 백그라운드의 M3U8 재파싱을 완전히 제거! (403 원천 차단!)
+    sendProgress(12, '보안 채널 통과, 백그라운드 다운로드 코어 엔진 가동 중...');
     
-    const totalLength = tsChunks.reduce((acc, chunk) => acc + (chunk ? chunk.length : 0), 0);
-    const mergedArray = new Uint8Array(totalLength);
-    let offset = 0;
-    
-    for (const chunk of tsChunks) {
-      if (chunk) {
-        mergedArray.set(chunk, offset);
-        offset += chunk.length;
-      }
-    }
-
-    // 6. 브라우저 최종 파일 다운로드 트리거 (.ts 포맷 무손실 원본 저장)
-    sendProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
-    
-    const blob = new Blob([mergedArray], { type: 'video/mp2t' });
-    const blobUrl = URL.createObjectURL(blob);
-    
-    const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
-    const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
-    const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
-    const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
-    const filename = `${prefix}_${cleanTitle}.ts`;
-
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.href = blobUrl;
-    downloadAnchor.download = filename;
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-
-    setTimeout(() => {
-      document.body.removeChild(downloadAnchor);
-      URL.revokeObjectURL(blobUrl);
-    }, 10000);
-    
-    sendProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
+    chrome.runtime.sendMessage({
+      action: 'startHlsBackgroundFetchWithTsUrls',
+      tsUrls: tsUrls,
+      m3u8Url: m3u8Url,
+      title: title
+    });
 
   } catch (err) {
-    console.error("HLS 동일 출처 다운로드 실패:", err);
-    sendProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+    console.error("M3U8 파싱 실패:", err);
+    sendProgress(0, '다운로드 준비 실패', true, false, err.message || err.toString());
   }
 }
+
+// =========================================================================
+// [백그라운드 통신] 대용량 비디오 청크 Base64 스트리밍 수신 및 디스크 스풀링 모듈
+// =========================================================================
+let backgroundTsChunks = [];
+
+function base64ToUint8Array(base64) {
+  const binary_string = window.atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes;
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'initBlobChunks') {
+    backgroundTsChunks = new Array(message.total);
+    sendResponse({ success: true });
+  } 
+  else if (message.action === 'storeBlobChunk') {
+    const { index, base64Data } = message;
+    const uint8Array = base64ToUint8Array(base64Data);
+    // 메모리에 쌓이지 않고 브라우저 임시 스토리지(디스크)로 자동 스풀링되도록 즉시 Blob화!
+    backgroundTsChunks[index] = new Blob([uint8Array]); 
+    sendResponse({ success: true });
+  } 
+  else if (message.action === 'finalizeBlobDownload') {
+    const { title, extension } = message;
+    
+    try {
+      // 배열로 된 Blob들을 단일 파일 Blob으로 병합
+      const finalBlob = new Blob(backgroundTsChunks, { type: extension === 'mp4' ? 'video/mp4' : 'video/mp2t' });
+      const blobUrl = URL.createObjectURL(finalBlob);
+      
+      const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
+      const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
+      const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
+      const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
+      const filename = `${prefix}_${cleanTitle}.${extension}`;
+
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.href = blobUrl;
+      downloadAnchor.download = filename;
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+
+      setTimeout(() => {
+        document.body.removeChild(downloadAnchor);
+        URL.revokeObjectURL(blobUrl);
+        backgroundTsChunks = []; // 메모리 완전 해제
+      }, 10000);
+      
+      sendResponse({ success: true });
+    } catch (e) {
+      console.error("최종 다운로드 처리 실패:", e);
+      sendResponse({ success: false, error: e.message });
+    }
+  }
+});
 
 /**
  * 동일 출처(Same-Origin) 환경에서 스트리밍 방식으로 단일 MP4 파일을 직접 Fetch하여 바이너리 병합 다운로드
  */
 async function downloadMp4FromContent(mp4Url, title) {
-  // 실시간 진행률 팝업창 전달 헬퍼 함수
   function sendProgress(progress, statusText, isError = false, isComplete = false, errorMsg = '') {
     chrome.runtime.sendMessage({
-      action: 'hlsDownloadProgress',
-      progress,
-      statusText,
-      isError,
-      isComplete,
-      errorMsg
-    }).catch(() => {
-      // 팝업창이 닫힌 경우 무시
-    });
+      action: 'hlsDownloadProgress', progress, statusText, isError, isComplete, errorMsg
+    }).catch(() => {});
   }
 
-  // 백그라운드 다운로드 세션 상태 초기 등록
-  chrome.runtime.sendMessage({
-    action: 'registerDownloadSession',
-    url: mp4Url,
-    title: title
-  }).catch(() => {});
-
   try {
-    sendProgress(5, '동영상 원본 데이터 연결 시도 중...');
-
-    // 동일 출처(Same-Origin) 패치이므로 CORS 우회와 동시에 로그인 세션 쿠키가 온전히 동봉됩니다.
-    const res = await fetch(mp4Url, { credentials: 'include' });
-    if (!res.ok) throw new Error(`비디오 서버 연결 실패 (상태 코드: ${res.status})`);
-
-    const reader = res.body.getReader();
-    const contentLength = +res.headers.get('Content-Length') || 0;
-    
-    let receivedLength = 0;
-    const chunks = [];
-    sendProgress(10, '데이터 수집 채널 연결 성공. 스트림 다운로드 가동!');
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      chunks.push(value);
-      receivedLength += value.length;
-
-      const progressPct = contentLength ? Math.round((receivedLength / contentLength) * 88) + 10 : 50;
-      const mbLoaded = (receivedLength / 1024 / 1024).toFixed(1);
-      const totalMb = contentLength ? (contentLength / 1024 / 1024).toFixed(1) + 'MB' : '알 수 없음';
-      
-      sendProgress(progressPct, `비디오 다운로드 중: ${mbLoaded}MB / ${totalMb} 완료`);
-    }
-
-    sendProgress(98, '수집된 데이터를 무손실 파일로 저장 준비 중...');
-
-    // chunks 배열(Uint8Array 조각들)을 하나로 병합
-    const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-    const mergedArray = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      mergedArray.set(chunk, offset);
-      offset += chunk.length;
-    }
-
-    const blob = new Blob([mergedArray], { type: 'video/mp4' });
-    const blobUrl = URL.createObjectURL(blob);
-    
-    const strippedTitle = title.replace(/^\[(ReadyStream|DarkKnight)\]\s*/i, '');
-    const safeTitle = strippedTitle.replace(/[\\/:*?"<>|]/g, '_');
-    const cleanTitle = safeTitle.replace(/\.(mp4|ts|m3u8)$/i, '');
-    const prefix = title.includes('ReadyStream') ? '[ReadyStream]' : '[DarkKnight]';
-    const filename = `${prefix}_${cleanTitle}.mp4`;
-
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.href = blobUrl;
-    downloadAnchor.download = filename;
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-
-    setTimeout(() => {
-      document.body.removeChild(downloadAnchor);
-      URL.revokeObjectURL(blobUrl);
-    }, 10000);
-
-    sendProgress(100, '다운로드 완료 및 MP4 소장 완료!', false, true);
-
+    sendProgress(12, '보안 채널 통과, MP4 백그라운드 다운로드 코어 엔진 가동 중...');
+    chrome.runtime.sendMessage({
+      action: 'startMp4BackgroundFetch',
+      url: mp4Url,
+      title: title
+    });
   } catch (err) {
-    console.error("MP4 동일 출처 다운로드 실패:", err);
+    console.error("MP4 다운로드 준비 실패:", err);
     sendProgress(0, '다운로드 실패', true, false, err.message || err.toString());
   }
 }

@@ -16,6 +16,152 @@ const lastBaseUrls = {};
 // 현재 진행 중인 백그라운드 다운로드 세션 상태 객체
 let activeDownloadSession = null;
 
+// 현재 다운로드 세션용으로 임시 추가된 DNR 규칙 ID 목록 (다운로드 전체 생명주기 동안 유지!)
+let downloadSessionRuleIds = [];
+let dynamicRuleIdCounter = 3001;
+// 이미 규칙이 등록된 호스트명 캐시 (중복 등록 방지)
+let registeredHostnames = new Set();
+
+/**
+ * 특정 호스트명에 매칭되는 모든 쿠키 수집
+ */
+async function getCookiesForDomain(hostname) {
+  try {
+    const allCookies = await chrome.cookies.getAll({});
+    const matchedCookies = allCookies.filter(cookie => {
+      const domain = cookie.domain;
+      if (hostname === domain) return true;
+      if (domain.startsWith('.')) {
+        const parentDomain = domain.slice(1);
+        if (hostname.endsWith('.' + parentDomain) || hostname === parentDomain) {
+          return true;
+        }
+      } else {
+        if (hostname.endsWith('.' + domain)) {
+          return true;
+        }
+      }
+      return false;
+    });
+    return matchedCookies.map(c => `${c.name}=${c.value}`).join('; ');
+  } catch (e) {
+    console.error("[다크나이트] 쿠키 수집 오류:", e);
+    return "";
+  }
+}
+
+/**
+ * Mixed Content 차단 예방을 위한 HTTPS 강제 전환 헬퍼
+ */
+function ensureHttps(url) {
+  if (typeof url !== 'string') return url;
+  if (url.startsWith('http://')) {
+    return url.replace('http://', 'https://');
+  }
+  return url;
+}
+
+/**
+ * [신규] 다운로드 세션 전용 DNR 규칙 추가 등록 (기존 규칙과 병합, 중복 방지)
+ * 
+ * 핵심 차이점: 이전 executeWithMultiBypasses와 달리, 콜백 완료 후 규칙을 즉시 해제하지 않습니다!
+ * 규칙은 다운로드가 완전히 끝날 때(성공/실패 모두) clearDownloadRules()로 명시적 해제합니다.
+ * 이를 통해 M3U8 파싱 → TS 다운로드 전환 구간에서 규칙 공백이 발생하지 않습니다.
+ */
+async function setupDownloadRules(urls) {
+  const extensionOrigin = chrome.runtime.getURL('').slice(0, -1);
+  const hostnames = [...new Set(urls.map(url => {
+    try {
+      return new URL(ensureHttps(url)).hostname;
+    } catch (e) {
+      return null;
+    }
+  }).filter(Boolean))];
+
+  // 이미 등록된 호스트는 건너뛰기 (중복 규칙 방지)
+  const newHostnames = hostnames.filter(h => !registeredHostnames.has(h));
+  if (newHostnames.length === 0) {
+    console.log("[다크나이트] 모든 호스트 규칙이 이미 등록되어 있음, 스킵:", hostnames);
+    return;
+  }
+
+  const newRules = [];
+  
+  for (const hostname of newHostnames) {
+    const cookieStr = await getCookiesForDomain(hostname);
+    
+    // ReadyStream/NaverCloud 특화 매핑
+    let refererValue, originValue;
+    if (hostname.includes('hducc.handong.edu') || hostname.includes('naverncp.com')) {
+      refererValue = "https://hducc.handong.edu/";
+      originValue = "https://hducc.handong.edu";
+    } else {
+      originValue = `https://${hostname}`;
+      refererValue = originValue + "/";
+    }
+
+    const requestHeaders = [
+      { header: "Referer", operation: "set", value: refererValue },
+      { header: "Origin", operation: "set", value: originValue }
+    ];
+
+    if (cookieStr) {
+      requestHeaders.push({ header: "Cookie", operation: "set", value: cookieStr });
+    }
+
+    const ruleId = dynamicRuleIdCounter++;
+    downloadSessionRuleIds.push(ruleId);
+    registeredHostnames.add(hostname);
+
+    newRules.push({
+      id: ruleId,
+      priority: 100,
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: requestHeaders,
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: extensionOrigin },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||" + hostname,
+        tabIds: [-1], // 백그라운드 fetch 요청에만 한정 (사용자 브라우저 탭 세션 오염 및 충돌 방지)
+        resourceTypes: ["xmlhttprequest", "other"]
+      }
+    });
+  }
+
+  if (newRules.length > 0) {
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({
+        addRules: newRules
+      });
+      console.log("[다크나이트] 다운로드 세션 DNR 규칙 추가 등록:", newHostnames);
+    } catch (e) {
+      console.error("[다크나이트] DNR 규칙 추가 등록 실패:", e);
+    }
+  }
+}
+
+/**
+ * [신규] 다운로드 세션 전용 DNR 규칙 전체 해제 (다운로드 완전 종료 시에만 호출!)
+ */
+async function clearDownloadRules() {
+  if (downloadSessionRuleIds.length > 0) {
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({
+        removeRuleIds: downloadSessionRuleIds
+      });
+      console.log("[다크나이트] 다운로드 세션 DNR 규칙 전체 해제 완료:", downloadSessionRuleIds.length, "개");
+    } catch (e) {
+      console.warn("[다크나이트] DNR 세션 규칙 해제 실패:", e);
+    }
+    downloadSessionRuleIds = [];
+    registeredHostnames.clear();
+  }
+}
+
 // 시작 시 또는 확장 프로그램 설치 시 declarativeNetRequest 규칙 동적 등록 (CORS 및 Referer 보안 완벽 우회!)
 chrome.runtime.onInstalled.addListener(() => {
   setupNetRequestRules();
@@ -149,18 +295,237 @@ async function setupNetRequestRules() {
         resourceTypes: [
           "main_frame", "sub_frame", "stylesheet", "script", "image", 
           "font", "object", "xmlhttprequest", "ping", "csp_report", 
-          "media", "websocket", "other"
         ]
+      }
+    },
+    {
+      id: 1020,
+      priority: 3, // LMS에서 호출하는 모든 외부 CDN (Naver Cloud 등) CORS 강제 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "*darkknight_cors_bypass=1*",
+        resourceTypes: ["xmlhttprequest", "media", "other"]
+      }
+    },
+    // === v2.0 SNS 플랫폼 CORS 우회 규칙 ===
+    {
+      id: 1007,
+      priority: 1, // 트위터(X) 비디오 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||video.twimg.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1008,
+      priority: 1, // 블루스카이 비디오 프로세서 CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||video.bsky.app",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1009,
+      priority: 1, // 블루스카이 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||video.cdn.bsky.app",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1010,
+      priority: 1, // 틱톡 비디오 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||tiktok.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1011,
+      priority: 1, // 틱톡 CDN (tiktokcdn) CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||tiktokcdn.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1012,
+      priority: 1, // 도우인(抖音) 비디오 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||douyinvod.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1013,
+      priority: 1, // 인스타그램/페이스북 CDN (cdninstagram + fbcdn) CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||cdninstagram.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1014,
+      priority: 1, // 페이스북 비디오 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||fbcdn.net",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1015,
+      priority: 1, // AV19 (vdnext.com) 비디오 CDN CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||vdnext.com",
+        resourceTypes: ["media", "xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1016,
+      priority: 1, // AV19 (nnvivi.site) 플레이어 CORS 허용
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" },
+          { header: "Access-Control-Allow-Credentials", operation: "set", value: "true" }
+        ]
+      },
+      condition: {
+        urlFilter: "||nnvivi.site",
+        resourceTypes: ["media", "xmlhttprequest", "other", "sub_frame"]
+      }
+    }
+  ];
+
+  const sessionRules = [
+    {
+      id: 1030,
+      priority: 3, // Service Worker(background.js)에서 직접 fetch하는 모든 비디오/청크 요청에 대한 범용 CORS 강제 허용 (탭과 무관한 요청 = tabIds: [-1])
+      action: {
+        type: "modifyHeaders",
+        responseHeaders: [
+          { header: "Access-Control-Allow-Origin", operation: "set", value: "*" }
+        ]
+      },
+      condition: {
+        urlFilter: "*",
+        tabIds: [-1], // 백그라운드 스크립트에서 발생한 요청에만 적용 (보안 유지)
+        resourceTypes: ["xmlhttprequest", "other"]
+      }
+    },
+    {
+      id: 1031,
+      priority: 4, // LMS CDN (Naver Cloud) Access Denied (403) 방지용 Referer 강제 주입
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: [
+          { header: "Referer", operation: "set", value: "https://lms.handong.edu/" }
+        ]
+      },
+      condition: {
+        requestDomains: ["naverncp.com", "hducc.handong.edu"],
+        tabIds: [-1], // 백그라운드 요청 전용
+        resourceTypes: ["xmlhttprequest", "media", "other"]
+      }
+    },
+    {
+      id: 1032,
+      priority: 4, // AV19 CDN Access Denied 방지용 Referer 강제 주입
+      action: {
+        type: "modifyHeaders",
+        requestHeaders: [
+          { header: "Referer", operation: "set", value: "https://av19.fit/" }
+        ]
+      },
+      condition: {
+        requestDomains: ["nnvivi.site", "av19.fit"],
+        tabIds: [-1],
+        resourceTypes: ["xmlhttprequest", "media", "other"]
       }
     }
   ];
 
   try {
     await chrome.declarativeNetRequest.updateDynamicRules({
-      removeRuleIds: [1001, 1002, 1003, 1004, 1005, 1006],
+      removeRuleIds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024, 1025, 1026, 1027, 1028, 1029],
       addRules: rules
     });
-    console.log("다크나이트 - Referer/Origin 및 CORS 우회 네트워크 규칙 등록 완료!");
+    
+    await chrome.declarativeNetRequest.updateSessionRules({
+      removeRuleIds: [1030, 1031, 1032],
+      addRules: sessionRules
+    });
+    
+    console.log("다크나이트 v2.0 - 범용 CORS 및 세션(Referer) 네트워크 규칙 등록 완료! (한동대 LMS + SNS 8개 플랫폼 + AV19 암호화 뚫기)");
   } catch (err) {
     console.error("DNR 규칙 등록 오류:", err);
   }
@@ -172,11 +537,38 @@ const MEDIA_PATTERNS = [
   { regex: /\.mp4([\?#]|$)/i, type: 'MP4 비디오' },
   { regex: /\.mpd([\?#]|$)/i, type: 'DASH (MPD) 스트림' },
   { regex: /\.webm([\?#]|$)/i, type: 'WebM 비디오' },
-  { regex: /\.mov([\?#]|$)/i, type: 'MOV 비디오' }
+  { regex: /\.mov([\?#]|$)/i, type: 'MOV 비디오' },
+  { regex: /\.ts([\?#]|$)/i, type: 'MPEG-TS 비디오' }
+];
+
+// v2.0 플랫폼별 CDN 자동 식별 패턴 (감지 시 스마트 라벨 자동 부여)
+const PLATFORM_PATTERNS = [
+  { regex: /video\.twimg\.com/i, platform: 'twitter', label: '🐦 X (트위터) 비디오' },
+  { regex: /video\.bsky\.app|video\.cdn\.bsky\.app/i, platform: 'bluesky', label: '🦋 블루스카이 비디오' },
+  { regex: /tiktokcdn\.com|v\d+-webapp.*\.tiktok\.com/i, platform: 'tiktok', label: '🎵 틱톡 비디오' },
+  { regex: /douyinvod\.com|douyincdn\.com/i, platform: 'douyin', label: '🎶 도우인(抖音) 비디오' },
+  { regex: /cdninstagram\.com|scontent.*instagram/i, platform: 'instagram', label: '📸 인스타그램 비디오' },
+  { regex: /fbcdn\.net|video.*facebook\.com/i, platform: 'facebook', label: '📘 페이스북 비디오' },
+  { regex: /hducc\.handong\.edu|naverncp\.com/i, platform: 'readystream', label: 'ReadyStream 강의 비디오' },
+  { regex: /googlevideo\.com|youtube\.com/i, platform: 'youtube', label: '▶️ YouTube 비디오' },
+  { regex: /vimeo\.com|vimeocdn\.com/i, platform: 'vimeo', label: '🎬 Vimeo 비디오' },
+  { regex: /nnvivi\.site|vdnext\.com|av19/i, platform: 'av19', label: '🔞 AV19 암호화 비디오 (복호화 가능)' }
 ];
 
 // 제외할 일반 주소 패턴
-const EXCLUDE_PATTERNS = /googlesyndication|doubleclick|analytics|log|tracker|adsystem|favicon/i;
+const EXCLUDE_PATTERNS = /googlesyndication|doubleclick|analytics\.google|log\.tiktok|tracker|adsystem|favicon|beacon/i;
+
+/**
+ * URL에서 플랫폼 감지 후 스마트 라벨 반환
+ */
+function detectPlatformLabel(url) {
+  for (const pattern of PLATFORM_PATTERNS) {
+    if (pattern.regex.test(url)) {
+      return pattern.label;
+    }
+  }
+  return null;
+}
 
 // 네트워크 요청 감시 리스너 설정
 chrome.webRequest.onBeforeRequest.addListener(
@@ -205,10 +597,14 @@ chrome.webRequest.onBeforeRequest.addListener(
     }
 
     if (matchedType) {
+      // v2.0 플랫폼 스마트 라벨 자동 적용
+      const platformLabel = detectPlatformLabel(url);
+      const finalType = platformLabel || matchedType;
+
       addMedia(tabId, {
         url: url,
-        type: matchedType,
-        title: extractFileName(url, matchedType),
+        type: finalType,
+        title: extractFileName(url, finalType),
         frameId: details.frameId,
         source: 'network',
         timestamp: Date.now()
@@ -294,7 +690,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const oldBaseUrl = lastBaseUrls[tabId];
     
     if (oldBaseUrl && newBaseUrl !== oldBaseUrl) {
-      detectedMedia[tabId] = [];
+      // [레이스 컨디션 완벽 방지] 페이지 로딩/전환 중에 네트워크 스니퍼가 먼저 감지한 미디어를
+      // URL 변경 이벤트가 즉시 비워버려 목록이 사라지는 오류를 해결하기 위해, 8초 이내 감지된 최신 미디어는 삭제 보류합니다.
+      const now = Date.now();
+      const preservationThreshold = 8000; // 8초 이내 감지 항목 보존
+      
+      const preservedMedia = (detectedMedia[tabId] || []).filter(item => {
+        return (now - item.timestamp) < preservationThreshold;
+      });
+      
+      detectedMedia[tabId] = preservedMedia;
       updateBadge(tabId);
 
       // 컨텐트 스크립트에 리셋 및 재스캔 지시 전송 (동적 프레임 대응을 위해 전송 후 catch)
@@ -315,8 +720,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 /**
  * 일반화된 HLS (M3U8) 실시간 자동 분할 다운로드 및 바이너리 머지 처리기 (백그라운드 서비스 워커 버전)
+ * 
+ * [v3.0 근본 재설계] setupDownloadRules → 다운로드 전체 → clearDownloadRules 생명주기 적용
+ * 이전 버전의 executeWithMultiBypasses 콜백 패턴에서 발생하던 규칙 해제 공백 문제를 완전 제거!
  */
 async function downloadHlsInBackground(m3u8Url, title, tabId) {
+  m3u8Url = ensureHttps(m3u8Url);
   const session = {
     tabId,
     url: m3u8Url,
@@ -351,6 +760,9 @@ async function downloadHlsInBackground(m3u8Url, title, tabId) {
   try {
     updateProgress(5, 'M3U8 마스터 플레이리스트 파일 수집 중...');
 
+    // [v3.0] 다운로드 세션 시작 시 DNR 규칙 등록 (M3U8 도메인)
+    await setupDownloadRules([m3u8Url]);
+
     // 1. M3U8 메인 주소 파싱
     const response = await fetch(m3u8Url, { credentials: 'include' });
     if (!response.ok) throw new Error(`M3U8 플레이리스트 요청 실패 (상태 코드: ${response.status})`);
@@ -373,7 +785,7 @@ async function downloadHlsInBackground(m3u8Url, title, tabId) {
             tsUrl = baseUrl + line;
           }
         }
-        tsUrls.push(tsUrl);
+        tsUrls.push(ensureHttps(tsUrl));
       }
     }
 
@@ -387,80 +799,381 @@ async function downloadHlsInBackground(m3u8Url, title, tabId) {
           if (!line.startsWith('http://') && !line.startsWith('https://')) {
             subUrl = baseUrl + line;
           }
-          subPlaylists.push(subUrl);
+          subPlaylists.push(ensureHttps(subUrl));
         }
       }
 
       if (subPlaylists.length > 0) {
         updateProgress(10, '고화질 서브 스트리밍 리스트 감지, 주소 전환 중...');
-        return downloadHlsInBackground(subPlaylists[0], title, tabId);
+        // [v3.0] clearDownloadRules를 호출하지 않고 재귀 호출! (규칙은 유지됨)
+        return await downloadHlsInBackground(ensureHttps(subPlaylists[0]), title, tabId);
       }
 
       throw new Error('M3U8 스트리밍 내에서 분할 비디오 조각(TS)을 찾지 못했습니다.');
     }
 
-    // 4. TS 파일 다운로드 가동 (5개 채널 동시 고속 다운로드)
-    const total = tsUrls.length;
-    const tsChunks = new Array(total);
-    updateProgress(15, `비디오 조각 다운로드 시작... (총 ${total}개 파편)`);
+    // [v3.0] TS 도메인에 대한 DNR 규칙 추가 등록 (기존 M3U8 규칙과 병합!)
+    await setupDownloadRules(tsUrls);
 
+    // 4. TS 파일 다운로드 가동 (5개 채널 동시 고속 다운로드)
+    await _downloadTsChunks(tsUrls, title, tabId, session, updateProgress);
+
+  } catch (err) {
+    console.error("백그라운드 HLS 다운로드 실패:", err);
+    updateProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+  } finally {
+    // [v3.0] 다운로드 완전 종료 후에만 규칙 해제! (성공/실패 모두)
+    await clearDownloadRules();
+  }
+}
+
+/**
+ * [v3.0 신규] content.js가 이미 파싱한 TS URL 목록을 직접 받아 즉시 다운로드 시작
+ * M3U8 재파싱을 완전히 건너뛰므로 403 발생 가능성이 원천 차단됩니다!
+ */
+async function downloadTsChunksDirectly(tsUrls, m3u8Url, title, tabId) {
+  const session = {
+    tabId,
+    url: m3u8Url,
+    title,
+    progress: 0,
+    statusText: 'TS 다운로드 직접 연결 중...',
+    isError: false,
+    isComplete: false,
+    errorMsg: ''
+  };
+  activeDownloadSession = session;
+
+  const updateProgress = (progress, statusText, isError = false, isComplete = false, errorMsg = '') => {
+    session.progress = progress;
+    session.statusText = statusText;
+    session.isError = isError;
+    session.isComplete = isComplete;
+    session.errorMsg = errorMsg;
+
+    chrome.runtime.sendMessage({
+      action: 'hlsDownloadProgress',
+      progress,
+      statusText,
+      isError,
+      isComplete,
+      errorMsg
+    }).catch(() => {});
+  };
+
+  try {
+    updateProgress(12, '보안 채널 통과, TS 다운로드 코어 엔진 직접 가동 중...');
+
+    // TS 도메인에 대한 DNR 규칙 등록
+    await setupDownloadRules(tsUrls);
+
+    // TS 파일 다운로드 가동
+    await _downloadTsChunks(tsUrls, title, tabId, session, updateProgress);
+
+  } catch (err) {
+    console.error("백그라운드 TS 직접 다운로드 실패:", err);
+    updateProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+  } finally {
+    await clearDownloadRules();
+  }
+}
+
+/**
+ * [v3.0 내부 헬퍼] TS 청크 실제 다운로드 및 content.js 디스크 스풀링 공통 로직
+ */
+async function _downloadTsChunks(tsUrls, title, tabId, session, updateProgress) {
+  const total = tsUrls.length;
+  updateProgress(15, `비디오 조각 다운로드 시작... (총 ${total}개 파편)`);
+
+  // 백그라운드 메모리 터짐(OOM) 방지를 위해 content.js에 Blob 배열 초기화 명령 전송
+  await chrome.tabs.sendMessage(tabId, { action: 'initBlobChunks', total: total });
+
+  let completedChunks = 0;
+  const concurrencyLimit = 5;
+
+  for (let i = 0; i < tsUrls.length; i += concurrencyLimit) {
+    if (activeDownloadSession !== session) return;
+
+    const batch = tsUrls.slice(i, i + concurrencyLimit);
+    const promises = batch.map(async (url, index) => {
+      const currentIndex = i + index;
+      
+      // 개별 TS fetch 실패 시 3회 재시도 (네트워크 불안정 대응)
+      let lastError;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const res = await fetch(ensureHttps(url));
+          if (!res.ok) throw new Error(`비디오 파편 다운로드 오류 (${res.status})`);
+          
+          const buffer = await res.arrayBuffer();
+          
+          // ArrayBuffer를 Base64로 변환하여 IPC 전송 (단일 청크 크기가 작으므로 안전)
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          const len = bytes.byteLength;
+          const chunkSize = 8192;
+          for (let j = 0; j < len; j += chunkSize) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunkSize));
+          }
+          const base64Data = btoa(binary);
+
+          // 즉시 content.js로 전송하여 Blob화(디스크 스풀링) 유도 -> 백그라운드 메모리 즉시 해제!
+          await chrome.tabs.sendMessage(tabId, {
+            action: 'storeBlobChunk',
+            index: currentIndex,
+            base64Data: base64Data
+          });
+          
+          completedChunks++;
+          const progressPct = Math.round((completedChunks / total) * 83) + 15; // 15% ~ 98% 진행
+          updateProgress(progressPct, `비디오 파편 수집 및 캐싱 중: ${completedChunks} / ${total} 개 완료`);
+          
+          lastError = null;
+          break; // 성공 시 재시도 루프 탈출
+        } catch (e) {
+          lastError = e;
+          if (attempt < 2) {
+            console.warn(`[다크나이트] TS 파편 ${currentIndex} 다운로드 재시도 (${attempt + 1}/3):`, e.message);
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1))); // 지수 백오프
+          }
+        }
+      }
+      if (lastError) throw lastError;
+    });
+
+    await Promise.all(promises);
+  }
+
+  // 바이너리 스트림 고속 병합 명령 하달
+  updateProgress(98, '수집된 비디오 파편 고속 병합 중...');
+  
+  // 브라우저 최종 파일 다운로드 트리거 (.ts 포맷 무손실 원본 저장)
+  updateProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
+  
+  chrome.tabs.sendMessage(tabId, {
+    action: 'finalizeBlobDownload',
+    title: title,
+    extension: 'ts'
+  }, { frameId: 0 }, (response) => {
+    // 완료 성공
+  });
+  
+  updateProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
+}
+
+/**
+ * AV19 암호화 HLS 실시간 복호화 및 병합 처리기 (AES-128)
+ */
+async function downloadEncryptedHlsInBackground(fragments, title, tabId) {
+  const session = {
+    tabId,
+    url: 'encrypted_hls_stream',
+    title,
+    progress: 0,
+    statusText: '암호화된 파편 다운로드 및 복호화 준비 중...',
+    isError: false,
+    isComplete: false,
+    errorMsg: ''
+  };
+  activeDownloadSession = session;
+
+  const updateProgress = (progress, statusText, isError = false, isComplete = false, errorMsg = '') => {
+    session.progress = progress;
+    session.statusText = statusText;
+    session.isError = isError;
+    session.isComplete = isComplete;
+    session.errorMsg = errorMsg;
+
+    chrome.runtime.sendMessage({
+      action: 'hlsDownloadProgress',
+      progress,
+      statusText,
+      isError,
+      isComplete,
+      errorMsg
+    }).catch(() => {});
+  };
+
+  try {
+    const total = fragments.length;
+    updateProgress(5, `암호화 파편 다운로드 및 실시간 복호화 시작... (총 ${total}개 파편)`);
+
+    await chrome.tabs.sendMessage(tabId, { action: 'initBlobChunks', total: total });
+
+    let completedChunks = 0;
     const concurrencyLimit = 5;
-    for (let i = 0; i < tsUrls.length; i += concurrencyLimit) {
-      // 세션이 도중에 리셋되었는지 검증
+
+    const fragmentUrls = fragments.map(f => ensureHttps(f.url));
+    // [v3.0] 다운로드 세션 시작 시 DNR 규칙 등록
+    await setupDownloadRules(fragmentUrls);
+
+    for (let i = 0; i < total; i += concurrencyLimit) {
       if (activeDownloadSession !== session) return;
 
-      const batch = tsUrls.slice(i, i + concurrencyLimit);
-      const promises = batch.map((url, index) => {
+      const batch = fragments.slice(i, i + concurrencyLimit);
+      const promises = batch.map(async (frag, index) => {
         const currentIndex = i + index;
-        return fetch(url, { credentials: 'include' })
-          .then(res => {
-            if (!res.ok) throw new Error(`비디오 파편 다운로드 오류 (${res.status})`);
-            return res.arrayBuffer();
-          })
-          .then(buffer => {
-            tsChunks[currentIndex] = new Uint8Array(buffer);
-            
-            const completed = tsChunks.filter(Boolean).length;
-            const progressPct = Math.round((completed / total) * 83) + 15; // 15% ~ 98% 진행
-            
-            updateProgress(progressPct, `비디오 파편 수집 중: ${completed} / ${total} 개 완료`);
-          });
+        
+        // 1. 파편 다운로드
+        const res = await fetch(ensureHttps(frag.url));
+        if (!res.ok) throw new Error(`암호화 파편 다운로드 오류 (${res.status})`);
+        const encryptedBuffer = await res.arrayBuffer();
+
+        // 2. WebCrypto API를 이용한 AES-128-CBC 복호화
+        let decryptedBuffer = encryptedBuffer;
+        if (frag.key && frag.iv) {
+          const keyData = new Uint8Array(frag.key);
+          const ivData = new Uint8Array(frag.iv);
+          
+          const cryptoKey = await crypto.subtle.importKey(
+            "raw",
+            keyData,
+            { name: "AES-CBC" },
+            false,
+            ["decrypt"]
+          );
+
+          decryptedBuffer = await crypto.subtle.decrypt(
+            { name: "AES-CBC", iv: ivData },
+            cryptoKey,
+            encryptedBuffer
+          );
+        }
+
+        // 3. Base64 스트리밍 전송
+        let binary = '';
+        const bytes = new Uint8Array(decryptedBuffer);
+        const len = bytes.byteLength;
+        const chunkSize = 8192;
+        for (let j = 0; j < len; j += chunkSize) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(j, j + chunkSize));
+        }
+        const base64Data = btoa(binary);
+
+        await chrome.tabs.sendMessage(tabId, {
+          action: 'storeBlobChunk',
+          index: currentIndex,
+          base64Data: base64Data
+        });
+        
+        completedChunks++;
+        const progressPct = Math.round((completedChunks / total) * 83) + 15; // 15% ~ 98% 진행
+        
+        updateProgress(progressPct, `복호화 및 디스크 캐싱 중: ${completedChunks} / ${total} 개 완료`);
       });
 
       await Promise.all(promises);
     }
 
-    // 5. 바이너리 스트림 고속 병합
-    updateProgress(98, '수집된 비디오 파편 고속 병합 중...');
-    
-    const totalLength = tsChunks.reduce((acc, chunk) => acc + (chunk ? chunk.length : 0), 0);
-    const mergedArray = new Uint8Array(totalLength);
-    let offset = 0;
-    
-    for (const chunk of tsChunks) {
-      if (chunk) {
-        mergedArray.set(chunk, offset);
-        offset += chunk.length;
-      }
-    }
-
-    // 6. 브라우저 최종 파일 다운로드 트리거 (.ts 포맷 무손실 원본 저장)
+    // 4. 로컬 저장 요청
+    updateProgress(98, '복호화된 파편 고속 병합 중...');
     updateProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
     
     chrome.tabs.sendMessage(tabId, {
-      action: 'executeBlobDownload',
-      arrayBuffer: mergedArray.buffer,
+      action: 'finalizeBlobDownload',
       title: title,
       extension: 'ts'
-    }, { frameId: 0 }, (response) => {
-      // 완료 성공
-    });
+    }, { frameId: 0 }, (response) => {});
     
-    updateProgress(100, '다운로드 완료 및 무손실 파일 소장 완료!', false, true);
+    updateProgress(100, '다운로드 및 복호화 무손실 파일 소장 완료!', false, true);
 
   } catch (err) {
-    console.error("백그라운드 HLS 다운로드 실패:", err);
+    console.error("암호화 다운로드 실패:", err);
     updateProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+  } finally {
+    // [v3.0] 다운로드 완전 종료 후에만 규칙 해제!
+    await clearDownloadRules();
+  }
+}
+
+/**
+ * 대용량 단일 MP4 파일 백그라운드 다운로드 (Service Worker에서 실행하여 CORS 우회 및 메모리 OOM 방지)
+ */
+async function downloadMp4InBackground(mp4Url, title, tabId) {
+  mp4Url = ensureHttps(mp4Url);
+  const session = Date.now();
+  activeDownloadSession = session;
+
+  function updateProgress(progress, statusText, isError = false, isComplete = false, errorMsg = '') {
+    if (activeDownloadSession !== session) return;
+    chrome.tabs.sendMessage(tabId, {
+      action: 'hlsDownloadProgress', progress, statusText, isError, isComplete, errorMsg
+    }).catch(() => {});
+  }
+
+  try {
+    updateProgress(5, '동영상 원본 데이터 연결 시도 중...');
+    
+    const bypassUrl = new URL(mp4Url);
+    bypassUrl.searchParams.set('darkknight_cors_bypass', '1');
+    
+    // [v3.0] 다운로드 세션 시작 시 DNR 규칙 등록
+    await setupDownloadRules([bypassUrl.href]);
+
+    const res = await fetch(bypassUrl.href);
+    if (!res.ok) throw new Error(`비디오 서버 연결 실패 (상태 코드: ${res.status})`);
+
+    const reader = res.body.getReader();
+    const contentLength = +res.headers.get('Content-Length') || 0;
+    
+    let receivedLength = 0;
+    let chunkIndex = 0;
+    
+    // content.js에 초기화 신호 전송 (크기를 모르므로 빈 배열 생성 유도, total은 지정안함)
+    await chrome.tabs.sendMessage(tabId, { action: 'initBlobChunks', total: 0 });
+    
+    updateProgress(10, '데이터 수집 채널 연결 성공. 스트림 다운로드 가동!');
+
+    while (true) {
+      if (activeDownloadSession !== session) {
+        reader.cancel();
+        return;
+      }
+      
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      // Base64 스트리밍 전송
+      let binary = '';
+      const len = value.length;
+      const chunkSize = 8192;
+      for (let j = 0; j < len; j += chunkSize) {
+        binary += String.fromCharCode.apply(null, value.subarray(j, j + chunkSize));
+      }
+      const base64Data = btoa(binary);
+
+      await chrome.tabs.sendMessage(tabId, {
+        action: 'storeBlobChunk',
+        index: chunkIndex++, // 배열에 순서대로 push되도록
+        base64Data: base64Data
+      });
+
+      receivedLength += len;
+
+      const progressPct = contentLength ? Math.round((receivedLength / contentLength) * 88) + 10 : 50;
+      const mbLoaded = (receivedLength / 1024 / 1024).toFixed(1);
+      const totalMb = contentLength ? (contentLength / 1024 / 1024).toFixed(1) + 'MB' : '알 수 없음';
+      
+      updateProgress(progressPct, `비디오 디스크 스풀링 다운로드 중: ${mbLoaded}MB / ${totalMb}`);
+    }
+
+    updateProgress(98, '수집된 데이터를 무손실 파일로 저장 준비 중...');
+    updateProgress(99, '다운로드 완료 처리 및 로컬 저장 중...');
+    
+    chrome.tabs.sendMessage(tabId, {
+      action: 'finalizeBlobDownload',
+      title: title,
+      extension: 'mp4'
+    }, { frameId: 0 }, () => {});
+    
+    updateProgress(100, '다운로드 완료 및 MP4 소장 완료!', false, true);
+
+  } catch (err) {
+    console.error("백그라운드 MP4 다운로드 실패:", err);
+    updateProgress(0, '다운로드 실패', true, false, err.message || err.toString());
+  } finally {
+    // [v3.0] 다운로드 완전 종료 후에만 규칙 해제!
+    await clearDownloadRules();
   }
 }
 
@@ -512,6 +1225,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     downloadHlsInBackground(url, title, tabId);
     sendResponse({ success: true, message: '백그라운드 HLS 다운로드 프로세스 시작됨' });
   } 
+
+  else if (message.action === 'startMp4BackgroundFetch') {
+    const { url, title } = message;
+    downloadMp4InBackground(url, title, tabId);
+    sendResponse({ success: true, message: '백그라운드 MP4 다운로드 프로세스 시작됨' });
+  }
+
+  else if (message.action === 'startEncryptedHlsDownload') {
+    const { fragments, title } = message;
+    downloadEncryptedHlsInBackground(fragments, title, tabId);
+    sendResponse({ success: true, message: '백그라운드 암호화 복호화 프로세스 시작됨' });
+  }
+
+  // [v3.0 신규] content.js가 이미 파싱한 TS URL 목록을 직접 수신하여 M3U8 재파싱 없이 즉시 다운로드!
+  else if (message.action === 'startHlsBackgroundFetchWithTsUrls') {
+    const { tsUrls, m3u8Url, title } = message;
+    downloadTsChunksDirectly(tsUrls, m3u8Url, title, tabId);
+    sendResponse({ success: true, message: '백그라운드 TS 직접 다운로드 프로세스 시작됨' });
+  }
   
   else if (message.action === 'addDomMedia') {
     if (tabId) {
@@ -531,18 +1263,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   else if (message.action === 'fetchReadyStreamHtml') {
-    // 백그라운드 특권을 사용하여 CORS/CSP 우회하며 로그인 세션 쿠키를 안전하게 동봉 요청!
-    fetch(message.url, { credentials: 'include' })
-      .then(res => {
+    const targetUrl = ensureHttps(message.url);
+    // [v3.0] 백그라운드 특권을 사용하여 CORS/CSP 우회하며 로그인 세션 쿠키를 안전하게 동봉 요청!
+    (async () => {
+      try {
+        await setupDownloadRules([targetUrl]);
+        const res = await fetch(targetUrl, { credentials: 'include' });
         if (!res.ok) throw new Error(`ReadyStream 페이지 수집 실패 (HTTP 상태 코드: ${res.status})`);
-        return res.text();
-      })
-      .then(html => {
+        const html = await res.text();
         sendResponse({ success: true, html: html });
-      })
-      .catch(err => {
+      } catch (err) {
         sendResponse({ success: false, error: err.message });
-      });
+      } finally {
+        await clearDownloadRules();
+      }
+    })();
     return true; // 비동기 응답 처리
   }
 

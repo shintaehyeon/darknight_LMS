@@ -147,7 +147,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (typeStr.includes('readystream')) typeClass = 'readystream';
       else if (typeStr.includes('youtube')) typeClass = 'youtube';
       else if (typeStr.includes('vimeo')) typeClass = 'vimeo';
-      else if (typeStr.includes('twitter') || typeStr.includes('x (')) typeClass = 'twitter';
+      else if (typeStr.includes('트위터') || typeStr.includes('twitter') || typeStr.includes('x (')) typeClass = 'twitter';
+      else if (typeStr.includes('틱톡') || typeStr.includes('tiktok')) typeClass = 'tiktok';
+      else if (typeStr.includes('도우인') || typeStr.includes('douyin') || typeStr.includes('抖音')) typeClass = 'douyin';
+      else if (typeStr.includes('인스타') || typeStr.includes('instagram')) typeClass = 'instagram';
+      else if (typeStr.includes('페이스북') || typeStr.includes('facebook')) typeClass = 'facebook';
+      else if (typeStr.includes('블루스카이') || typeStr.includes('bluesky')) typeClass = 'bluesky';
+      else if (typeStr.includes('av19') || typeStr.includes('암호화')) typeClass = 'av19';
       else if (typeStr.includes('m3u8')) typeClass = 'm3u8';
 
       // DOM 소스 한글화 명칭 매핑
@@ -171,6 +177,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           </button>
           <button class="btn btn-secondary open-player-btn" data-url="${item.url}">
             플레이어 열기
+          </button>
+          <button class="btn btn-secondary copy-btn" data-url="${item.url}">
+            주소 복사
+          </button>
+        `;
+      } else if (typeClass === 'av19') {
+        actionButtons = `
+          <button class="btn btn-primary download-btn av19-btn" data-url="${item.url}" data-type="av19" data-frame-id="${item.frameId || ''}">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 4px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+            </svg>
+            1클릭 복호화 다운로드
           </button>
           <button class="btn btn-secondary copy-btn" data-url="${item.url}">
             주소 복사
@@ -239,7 +257,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         const frameId = (frameIdStr !== null && frameIdStr !== '') ? parseInt(frameIdStr, 10) : null;
         const progressCard = document.querySelector('.progress-card');
 
-        if (type.includes('M3U8') || type.includes('m3u8') || url.includes('.m3u8') || url.includes('hducc.handong.edu') || url.includes('/em/')) {
+        if (type.includes('AV19') || type.includes('av19') || type.includes('복호화')) {
+          overlay.classList.remove('hidden');
+          progressCard.classList.remove('error');
+          closeBtn.classList.add('hidden');
+          fill.style.width = '0%';
+          percent.textContent = '0%';
+          status.textContent = '인젝션 스크립트에 암호화 키 탈취 명령 하달 중...';
+
+          chrome.tabs.sendMessage(activeTab.id, {
+            action: 'startAv19Download',
+            url: url,
+            title: title
+          });
+        } else if (type.includes('M3U8') || type.includes('m3u8') || url.includes('.m3u8') || url.includes('hducc.handong.edu') || url.includes('/em/')) {
           // 다크나이트 1클릭 자동 다운로더 가동!
           
           if (url.includes('/em/') || url.includes('hducc.handong.edu')) {

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "다크나이트 - LMS 동영상 다운로더",
-  "version": "1.0.0",
-  "description": "LMS 강의실 및 웹 페이지에서 M3U8/MP4 동영상을 자동으로 감지하여 간편하게 추출하고 다운로드합니다.",
+  "name": "다크나이트 - 범용 미디어 다운로더",
+  "version": "2.0.0",
+  "description": "SNS(트위터/X, 블루스카이, 틱톡, 도우인, 인스타그램, 페이스북), LMS, 웹 사이트의 동영상을 자동으로 감지하여 간편하게 다운로드합니다.",
   "permissions": [
     "webRequest",
     "declarativeNetRequest",
