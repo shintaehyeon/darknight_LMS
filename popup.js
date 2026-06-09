@@ -233,6 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         <div class="media-action-row" style="flex-wrap: wrap;">
           ${actionButtons}
         </div>
+        <button class="btn ai-tutor-btn" data-url="${item.url}" data-title="${item.title}" style="background: linear-gradient(90deg, #3b82f6 0%, #8b5cf6 100%); color: white; border: none; font-weight: bold; margin-top: 8px; width: 100%; border-radius: 6px; padding: 10px; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          🔥 원클릭 AI 스마트 학습
+        </button>
       `;
 
       mediaListEl.appendChild(card);
@@ -419,6 +423,38 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (err) {
           console.error("클립보드 복사 실패:", err);
           alert("주소 복사에 실패했습니다. 수동으로 주소를 복사해 주세요.");
+        }
+      });
+    });
+
+    // 4. AI 스마트 학습 버튼 처리 (Next.js SaaS 연동)
+    document.querySelectorAll('.ai-tutor-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        const url = btn.getAttribute('data-url');
+        const title = btn.getAttribute('data-title');
+        
+        try {
+          const videoUrlObj = new URL(url);
+          chrome.cookies.getAll({ domain: videoUrlObj.hostname }, (cookies) => {
+            const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+            
+            btn.innerHTML = '워커 엔진 전송 중...';
+            
+            fetch('http://localhost:4000/process', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url: url, title: title, cookies: cookieString, referer: url })
+            }).then(res => res.json()).then(data => {
+              chrome.tabs.create({ url: `http://localhost:3000/dashboard?jobId=${data.jobId || 'new'}` });
+              btn.innerHTML = '엔진 가동 완료!';
+            }).catch(err => {
+              console.error("SaaS API 전송 실패:", err);
+              // Fallback for local development if server is not handling POST correctly yet
+              chrome.tabs.create({ url: `http://localhost:3000?videoUrl=${encodeURIComponent(url)}&title=${encodeURIComponent(title)}` });
+            });
+          });
+        } catch(err) {
+          chrome.tabs.create({ url: `http://localhost:3000?videoUrl=${encodeURIComponent(url)}` });
         }
       });
     });
